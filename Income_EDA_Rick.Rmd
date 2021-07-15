@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(tidyverse)
+library(VIM)
 library(caret)
 library(corrplot)
 library(ggplot2) 
@@ -51,8 +52,56 @@ native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, 
 
 Add column names to data set:
 ```{r}
-colnames(adult) <- c("age","workclass","fnlwgt","education","education-num","marital-status","occupation","relationship","race","sex","capital-gain","capital-loss","hours-per-week","native-country","income")
+# NOTE: names using underscore instead of hyphen so they can be referenced easier later
+colnames(adult) <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income")
 
 view(adult)
+```
+
+Investigate NA values to determine what needs resolution
+
+```{r}
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
+#Note there are not missing values showing up initially but that's because the missing values are represented by "?" instead of NA
+
+#Replace "?" with NA and re-do missing value analysis
+adult[, 1:14][adult[, 1:14] == " ?"] <- NA
+view(adult)
+
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
+marginplot(adult[c(2,7)])
+marginplot(adult[c(2,14)])
+marginplot(adult[c(7,14)])
+
+#occupation missing 5.66% of values
+#workclass missing 5.64% of values
+#native-country missing 1.79& of values
+#Note that half of the missing workclass values occur on observations that are also missing occupation
+```
+
+Examine formats of data available
+
+```{r}
+str(adult)
+
+#Convert character vars to factors and make list of vars
+adult$workclass <- as.factor(adult$workclass)
+adult$education <- as.factor(adult$education)
+adult$marital_status <- as.factor(adult$marital_status)
+adult$occupation <- as.factor(adult$occupation)
+adult$relationship <- as.factor(adult$relationship)
+adult$race <- as.factor(adult$race)
+adult$sex <- as.factor(adult$sex)
+adult$native_country <- as.factor(adult$native_country)
+adult$income <- as.factor(adult$income)
+
+categorical.explanatory = c("workclass","education","marital_status","occupation","relationship","race","sex","native_country")
+
+str(adult)
+
+```
+
+
+```{r}
 
 ```
