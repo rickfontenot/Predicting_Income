@@ -14,6 +14,11 @@ library(caret)
 library(corrplot)
 library(ggplot2) 
 library(ggthemes)
+library(vcd)
+install.packages("gtsummary")
+library(gtsummary)
+library(Hmisc)
+
 ```
 
 Load Theme for plots
@@ -58,27 +63,6 @@ colnames(adult) <- c("age","workclass","fnlwgt","education","education_num","mar
 view(adult)
 ```
 
-Investigate NA values to determine what needs resolution
-
-```{r}
-aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
-#Note there are not missing values showing up initially but that's because the missing values are represented by "?" instead of NA
-
-#Replace "?" with NA and re-do missing value analysis
-adult[, 1:14][adult[, 1:14] == " ?"] <- NA
-view(adult)
-
-aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
-marginplot(adult[c(2,7)])
-marginplot(adult[c(2,14)])
-marginplot(adult[c(7,14)])
-
-#occupation missing 5.66% of values
-#workclass missing 5.64% of values
-#native-country missing 1.79& of values
-#Note that half of the missing workclass values occur on observations that are also missing occupation
-```
-
 Examine formats of data available
 
 ```{r}
@@ -100,8 +84,568 @@ categorical.explanatory = c("workclass","education","marital_status","occupation
 str(adult)
 
 ```
+Investigate NA values to determine what needs resolution
+
+```{r}
+#Replace "?" with NA and re-do missing value analysis
+adult[, 1:14][adult[, 1:14] == " ?"] <- NA
+view(adult)
+
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"), prop=FALSE,cex.numbers=0.8)
+
+#occupation missing 5.66% of values
+#workclass missing 5.64% of values
+#native-country missing 1.79& of values
+#Note that half of the missing workclass values occur on observations that are also missing occupation
+
+#See how important occupation and workclass are to explaining income
+occupation = table(adult$income, adult$occupation)
+mosaicplot(occupation, shade = TRUE, las=2, main = "occupation", pop = FALSE)
+occupationchisq <- chisq.test(occupation) 
+occupationchisq #p-value = 2,2e-16
+#As expected almost all occupation types have significant differences between income groups
+#Danger of using MICE to impute an incorrect value, are there correlations?
+
+workclass = table(adult$income, adult$workclass)
+mosaicplot(workclass, shade = TRUE, las=2, main = "workclass", pop = FALSE)
+workclasschisq <- chisq.test(workclass) 
+workclasschisq #p-value = 2,2e-16
+#Danger of using MICE to impute an incorrect value, are there correlations?
+#May look at reducing levels to Government, Private, Self-Employed, Unemployed
+
+```
+
+
+Summary Statistics for Categorical variables & Distributions for Numerical variables
 
 
 ```{r}
 
+categorical <- adult %>% select(categorical.explanatory)
+categorical %>% tbl_summary()
+
+hist.data.frame(adult %>% select(-categorical.explanatory,-income))
+
 ```
+
+Check initial simple logistic regression with no cleaning or additional features
+(Dropped all NA, dropped fnlwgt, no imputing of missing values)
+
+AIC: 16641
+Accuracy : 0.8181 
+Sensitivity : 0.9412          
+Specificity : 0.4460 **Poor Specificity
+
+```{r}
+logit.set <- adult %>% select(-fnlwgt)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+#79.91% accuracy on training set used in model
+```
+Explore Categorical Varaibles vs. Income 
+
+workclass
+
+```{r workclass}
+workclass = table(adult$income, adult$workclass)
+mosaicplot(workclass, shade = TRUE, las=2, main = "workclass", pop = FALSE)
+workclasschisq <- chisq.test(workclass) 
+workclasschisq
+#X-squared = 827.72 , p-value=2.2e-16
+
+#Evaluate reducing levels to Government, Private, Self-Employed, Other
+adult$workclass <- trimws(adult$workclass)
+adult$work_sector <- "Other"
+adult$work_sector[adult$workclass %in% c("Federal-gov","Local-gov","State-gov")] <- "Government"
+adult$work_sector[adult$workclass %in% c("Private")] <- "Private"
+adult$work_sector[adult$workclass %in% c("Self-emp-inc","Self-emp-not-inc")] <- "Self_Employed"
+adult$work_sector[adult$workclass %in% c("Never-worked","Without-pay")] <- "Not_Working"
+adult$work_sector = as.factor(adult$work_sector)
+
+work_sector = table(adult$income, adult$work_sector)
+mosaicplot(work_sector, shade = TRUE, las=2, main = "work_sector", pop = FALSE)
+work_sectorchisq <- chisq.test(work_sector) 
+work_sectorchisq
+#X-squared = 565.28 , p-value=2.2e-16
+#Since X-Square decreased the difference between levels is not quite as strong but does simplify
+
+adult <- adult %>% select(-work_sector)
+```
+
+education
+
+```{r education}
+education = table(adult$income, adult$education)
+mosaicplot(education, shade = TRUE, las=2, main = "education", pop = FALSE)
+educationchisq <- chisq.test(education) 
+educationchisq
+#X-squared = 4429.7 , p-value=2.2e-16
+#Hard to read since factor levels not in proper order
+
+adult$education <- trimws(adult$education)
+
+adult %>% mutate(education = fct_reorder(education, education_num)) %>% ggplot(aes(x=education,y=education_num)) + 
+  geom_boxplot()+ labs(title= "education vs education_num" , x = "Level", y= "Number") +
+  theme(axis.text.x=element_text(angle=45,hjust=1))
+
+#Note these two columns are the same info, which is better categorical or numerical? Based on initial logistic regression the numeric has lower p-value and more significance
+```
+
+marital_status
+
+```{r marital_status}
+marital_status = table(adult$income, adult$marital_status)
+mosaicplot(marital_status, shade = TRUE, las=2, main = "marital_status", pop = FALSE)
+marital_statuschisq <- chisq.test(marital_status) 
+marital_statuschisq
+#X-squared = 6518 , p-value=2.2e-16
+
+#Evaluate reducing levels to Married, Single, Previously-Married
+adult$marital_status <- trimws(adult$marital_status)
+adult$marriage_status <- "Other"
+adult$marriage_status[adult$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+adult$marriage_status[adult$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+adult$marriage_status[adult$marital_status %in% c("Never-married")] <- "Single"
+adult$marriage_status = as.factor(adult$marriage_status)
+
+marriage_status = table(adult$income, adult$marriage_status)
+mosaicplot(marriage_status, shade = TRUE, las=2, main = "marriage_status", pop = FALSE)
+marriage_statuschisq <- chisq.test(marriage_status) 
+marriage_statuschisq
+#X-squared = 6509 , p-value=2.2e-16
+#Only slight decrease in X-squared much easier to interpret
+
+#Relationship may be correlated
+#Do marital status + gender = relationship status?
+marriage_vs_relationship = table(adult$relationship, adult$marriage_status)
+marriage_vs_relationship
+chisq.test(marriage_vs_relationship) 
+```
+
+occupation
+
+```{r occupation}
+occupation = table(adult$income, adult$occupation)
+mosaicplot(occupation, shade = TRUE, las=2, main = "occupation", pop = FALSE)
+occupationchisq <- chisq.test(occupation) 
+occupationchisq
+#X-squared = 3745 , p-value = 2,2e-16
+
+occupation_vs_workclass = table(adult$occupation, adult$workclass)
+occupation_vs_workclass
+chisq.test(occupation_vs_workclass) 
+
+#Could possibly reduce to Blue-Collar / White-Collar but categorization tricky
+```
+
+relationship
+
+```{r relationship}
+#See marital status above this variable seems correlated and weaker predictor
+```
+
+race
+
+```{r race}
+race = table(adult$income, adult$race)
+mosaicplot(race, shade = TRUE, las=2, main = "race", pop = FALSE)
+racechisq <- chisq.test(race) 
+racechisq
+#X-squared = 331 , p-value = 2,2e-16
+
+race_vs_native_country = table(adult$race, adult$native_country)
+race_vs_native_country
+chisq.test(race_vs_native_country) 
+```
+
+sex
+
+```{r sex}
+sex = table(adult$income, adult$sex)
+mosaicplot(sex, shade = TRUE, las=2, main = "sex", pop = FALSE)
+sexchisq <- chisq.test(sex) 
+sexchisq
+#X-squared = 1518 , p-value = 2,2e-16
+```
+
+native_country
+
+```{r native_country}
+#see above this is correlated to race which may be better predictor
+
+native_country = table(adult$income, adult$native_country)
+mosaicplot(native_country, shade = TRUE, las=2, main = "race", pop = FALSE)
+native_countrychisq <- chisq.test(native_country) 
+native_countrychisq
+#X-squared = 331 , p-value = 2,2e-16
+
+```
+
+
+
+```{r VIF}
+car::vif(model)
+```
+Based on EDA above re-run logistic regression with:
+Drop education since correlated with education_num
+Drop marital_status and use reduced level marriage_status
+Drop relationship since also explained by marriage_status & sex
+Drop native_country since correlated with race
+
+AIC: 14884 vs original 16641 -->improved
+Accuracy : 0.8382 vs original 0.8181 -->improved
+Sensitivity : 0.9321 vs original 0.9412 --> dropped a little        
+Specificity : 0.5640 vs original 0.4460 -->improved
+
+**Note that occupation shows as not significant, may want to reduce levels and try again
+
+```{r}
+logit.set <- adult %>% select(-fnlwgt,-education,-marital_status,-relationship,-native_country,-collar)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+#logit.set$education <- as.numeric(logit.set$education)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+#logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+#79.91% accuracy on training set used in model
+
+```
+
+Occupation binned as White Collar or Blue Collar
+
+```{r collar}
+#Evaluate reducing levels to Government, Private, Self-Employed, Other
+adult$occupation <- trimws(adult$occupation)
+adult$collar <- "Other"
+adult$collar[adult$occupation %in% c("Adm-clerical")] <- "White-support"
+adult$collar[adult$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+adult$collar[adult$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+adult$collar = as.factor(adult$collar)
+
+collar = table(adult$income, adult$collar)
+mosaicplot(collar, shade = TRUE, las=2, main = "Occupation Group", pop = FALSE)
+collarchisq <- chisq.test(collar) 
+collarchisq
+#X-squared = 2884 , p-value = 2,2e-16 
+# **Reduced X-squared but still significant check regression effect
+```
+
+Re-check regression with collar instead of occupation see if significant now
+
+Collar shows as significant as do all variables included
+
+AIC: 14781 vs original 14884 -->improved
+Accuracy : 0.8418 vs original 0.8382 -->improved
+Sensitivity : 0.9315 vs original 0.9321 --> dropped a little        
+Specificity : 0.5678 vs original 0.5640 -->improved
+
+
+```{r}
+logit.set <- adult %>% select(-fnlwgt,-education,-marital_status,-relationship,-native_country,-occupation)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+#logit.set$education <- as.numeric(logit.set$education)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$collar <- as.numeric(logit.set$collar)
+#logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+```
+
+Explore numerical variables vs income
+
+age
+```{r age}
+adult$income.binary<-0
+adult$income.binary[adult$income==" >50K"] <- 1
+age_rates <- adult %>% group_by(age) %>% summarise(income_above = mean(income.binary))
+
+age_rates %>% ggplot(mapping=aes(y=income_above, x=age)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs Age")
+#Note this relationship is not linear, can it be transformed?
+
+linearModel <- lm(income_above ~ age, data=age_rates)
+summary(linearModel)
+#Adj. R2 ~=0 age is not significant
+
+age_rates$age2 = age_rates$age^2
+quadraticModel2 <- lm(income_above ~ age + age2, data=age_rates)
+summary(quadraticModel)
+#Adj. R2 = 0.726 and second order term is significant
+#income = -0.49214 + 0.0316588*age - 0.0002959*age^2
+
+age <- seq(from = 17, to = 90, by = 1)
+second_order<- data.frame(age)
+second_order$income_above <- -0.49214 + 0.0316588*second_order$age - 0.0002959*second_order$age^2
+ggplot(age_rates, aes(y=income_above, x=age)) + geom_point() +geom_line(data = second_order) +  labs(title="%Income above 50K vs Age + Age^2")
+
+age_rates$age3 = age_rates$age^3
+quadraticModel3 <- lm(income_above ~ age + age2 + age3, data=age_rates)
+summary(quadraticModel3)
+#Adj. R2 = 0.78 and third order term is significant
+#income = -0.9188 + 0.06215*age - 0.0009301*age^2 + 0.000003979*age^3
+
+third_order<- data.frame(age)
+third_order$income_above <- -0.9188 + 0.06215*third_order$age - 0.0009301*third_order$age^2 + 0.000003979*age^3
+ggplot(age_rates, aes(y=income_above, x=age)) + geom_point() +geom_line(data = third_order) +  labs(title="%Income above 50K vs Age + Age^2 + Age^3")
+
+#How can we transform this for regression? or should we add Age^2 and Age^3 to model?
+
+```
+
+Re-check logistic regression with Age^2 and Age^3
+Both Terms are significant
+
+AIC: 14568 vs original 14884 -->improved
+Accuracy : 0.8391 vs original 0.8382 -->improved
+Sensitivity : 0.9315 vs original 0.9321 --> dropped a little        
+Specificity : 0.5655 vs original 0.5640 -->improved
+
+```{r}
+logit.set <- adult %>% select(-fnlwgt,-education,-marital_status,-relationship,-native_country)
+logit.set$age2 = logit.set$age^2
+logit.set$age3 = logit.set$age^3
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+#logit.set$education <- as.numeric(logit.set$education)
+#logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+#logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+```
+
+fnlwgt
+
+```{r fnlwgt}
+fnlwgt_rates <- adult %>% group_by(fnlwgt) %>% summarise(income_above = mean(income.binary))
+
+fnlwgt_rates %>% ggplot(mapping=aes(y=income_above, x=fnlwgt)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs fnlwgt")
+
+#No relationship, as mentioned previously drop this variable
+```
+
+education_num
+
+```{r education_num}
+education_num_rates <- adult %>% group_by(education_num) %>% summarise(income_above = mean(income.binary))
+
+education_num_rates %>% ggplot(mapping=aes(y=income_above, x=education_num)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs education_num")
+
+#Note this relationship is not linear, check quadratic transformation
+
+linearModel <- lm(income_above ~ education_num, data=education_num_rates)
+summary(linearModel)
+#Adj. R2 =0.7858
+
+education_num_rates$education_num2 = education_num_rates$education_num^2
+quadraticModel2 <- lm(income_above ~ education_num + education_num2, data=education_num_rates)
+summary(quadraticModel2)
+#Adj. R2 = 0.9637 and second order term is significant
+#income = 0.1005427 - 0.0422404*education_num - 0.0052366*education_num^2
+
+education_num <- seq(from = 1, to = 16, by = 1)
+second_order<- data.frame(education_num_rates)
+second_order$income_above <- 0.1005427 - 0.0422404*second_order$education_num + 0.0052366*second_order$education_num^2
+ggplot(education_num_rates, aes(y=income_above, x=education_num)) + geom_point() +geom_line(data = second_order) +  labs(title="%Income above 50K vs Education + Education^2")
+
+#Second degree quadratic fits well, add Education^2 to logistic regression
+```
+
+capital_gain
+
+```{r capital_gain}
+capital_gain <- adult %>% group_by(capital_gain) %>% summarise(income_above = mean(income.binary))
+
+capital_gain %>% ggplot(mapping=aes(y=income_above, x=capital_gain)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs education_num")
+
+#Not a usefull plot need to bin capital gains
+
+capital_gain <- adult %>% mutate(capital_gain_bin = cut(capital_gain, seq(min(capital_gain), max(capital_gain) + 10000, 10000), right = FALSE))
+
+capital_gain_rates <- capital_gain %>% group_by(capital_gain_bin) %>% summarise(n=n(),income_above = mean(income.binary))
+
+capital_gain_rates %>% ggplot(mapping=aes(y=income_above, x=capital_gain_bin)) + geom_point(aes(size=n))+  labs(title="%Income above 50K vs capital_gain_bin")+geom_text(aes(label=n),hjust=-0.5, vjust=0.5)
+```
+
+capital_loss
+
+```{r capital_loss}
+capital_loss <- adult %>% group_by(capital_loss) %>% summarise(income_above = mean(income.binary))
+
+capital_loss %>% ggplot(mapping=aes(y=income_above, x=capital_loss)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs education_num")
+
+#Not a usefull plot need to bin capital gains
+
+capital_loss <- adult %>% mutate(capital_loss_bin = cut(capital_loss, seq(min(capital_loss), max(capital_loss) + 1000, 1000), right = FALSE))
+
+capital_loss_rates <- capital_loss %>% group_by(capital_loss_bin) %>% summarise(n=n(),income_above = mean(income.binary))
+
+capital_loss_rates %>% ggplot(mapping=aes(y=income_above, x=capital_loss_bin)) + geom_point(aes(size=n))+  labs(title="%Income above 50K vs capital_loss_bin")+geom_text(aes(label=n),hjust=-0.5, vjust=0.5)
+```
+Look at binning to just some capital gain or loss vs zero
+
+```{r capital}
+adult$capital_gains<-"No"
+adult$capital_gains[adult$capital_gain>0] <-"Yes"
+adult$capital_losses<-"No"
+adult$capital_losses[adult$capital_loss>0] <-"Yes"
+
+capital = table(adult$capital_gains, adult$capital_losses)
+capital
+#Note the people with capital gains are different than those with capital losses, may not want to combine them into single capital gains/losses variable even if they both show similar trends
+
+```
+hours_per_week
+
+```{r hours}
+hours_per_week_rates <- adult %>% group_by(hours_per_week) %>% summarise(n=n(),income_above = mean(income.binary))
+
+hours_per_week_rates %>% ggplot(mapping=aes(y=income_above, x=hours_per_week)) + geom_point(aes(size=n))+  labs(title="%Income above 50K vs hours_per_week")
+
+#Doesn't appear linear, explore quadratic fits
+
+linearModel <- lm(income_above ~ hours_per_week, data=hours_per_week_rates)
+summary(linearModel)
+#Adj. R2 =0.15
+
+hours_per_week_rates$hours_per_week2 = hours_per_week_rates$hours_per_week^2
+quadraticModel2 <- lm(income_above ~ hours_per_week + hours_per_week2, data=hours_per_week_rates)
+summary(quadraticModel2)
+#Adj. R2 = 0.2366 and second order term is significant
+#income = -0.04471 + 0.01044*hours_per_week - 0.00007831*hours_per_week^2
+
+hours_per_week <- seq(from = 1, to = 99, by = 1)
+second_order<- data.frame(hours_per_week)
+second_order$income_above <- -0.04471 + 0.01044*second_order$hours_per_week - 0.00007831*second_order$hours_per_week^2
+ggplot(hours_per_week_rates, aes(y=income_above, x=hours_per_week)) + geom_point() +geom_line(data = second_order) +  labs(title="%Income above 50K vs hours_per_week + hours_per_week^2")
+
+#Fit is not great, try adding term
+
+hours_per_week_rates$hours_per_week3 = hours_per_week_rates$hours_per_week^3
+quadraticModel3 <- lm(income_above ~ hours_per_week + hours_per_week2 + hours_per_week3, data=hours_per_week_rates)
+summary(quadraticModel3)
+#Adj. R2 = 0.2889 but first order term is not significant
+#income = -0.08125 - 0.004452*hours_per_week + 0.0002951*hours_per_week^2 - 0.000002499*hours_per_week^3
+
+third_order<- data.frame(hours_per_week)
+third_order$income_above <- -0.08125 - 0.004452*third_order$hours_per_week + 0.0002951*third_order$hours_per_week^2 - 0.000002499*third_order$hours_per_week^3
+ggplot(hours_per_week_rates, aes(y=income_above, x=hours_per_week)) + geom_point() +geom_line(data = third_order) +  labs(title="%Income above 50K vs hours_per_week + hours_per_week^3")
+
+#Third order doesn't look like good fit. Try adding secod order into model, but non-parametric may be better with this variable
+```
+
+Examine pairwise plots for numerical variables colored by income group to look for interactions
+
+Do same for categorical vs numerical?
+
+Create ROC curves to see best cut point on probabilities
+
+Use PCA to reduce amount of explanatory variables
