@@ -1,0 +1,367 @@
+---
+title: "Cameron_Scratch_Sheet"
+author: "Cameron Stewart"
+date: "7/20/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r include=FALSE,message=FALSE,warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(VIM)
+library(caret)
+library(corrplot)
+library(ggplot2) 
+library(ggthemes)
+library(naniar)
+library(scales)
+library(stringr)
+library(corrplot)
+library(Hmisc)
+```
+
+Load Theme for plots
+
+```{r }
+theme_set(theme_fivethirtyeight())
+theme_update(axis.title = element_text()) #the default for fivethirtyeight is to not show axis labels, this removes that default so we can choose to specify and display axis titles
+theme_update(plot.title = element_text(hjust = 0.5)) # changing default to center all titles
+```
+
+Load Data downloaded from UCI and stored on github repo
+https://archive.ics.uci.edu/ml/datasets/Adult
+
+```{r load data}
+adult = read.csv("/Users/Camo/Documents/SMU_DS/Applied Stats/Project2/Predicting_Income/adult.data", header = FALSE)
+```
+
+Description of variables from UCI:
+
+Response: >50K, <=50K.
+
+age: continuous.
+workclass: Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked.
+fnlwgt: continuous.
+education: Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool.
+education-num: continuous.
+marital-status: Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse.
+occupation: Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handlers-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces.
+relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried.
+race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black.
+sex: Female, Male.
+capital-gain: continuous.
+capital-loss: continuous.
+hours-per-week: continuous.
+native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands.
+
+Add column names to data set:
+```{r}
+# NOTE: names using underscore instead of hyphen so they can be referenced easier later
+colnames(adult) <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income")
+```
+
+Investigate NA values to determine what needs resolution
+
+```{r}
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
+#Note there are not missing values showing up initially but that's because the missing values are represented by "?" instead of NA
+
+#Replace "?" with NA and re-do missing value analysis
+adult[, 1:14][adult[, 1:14] == " ?"] <- NA
+
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
+marginplot(adult[c(2,7)])
+marginplot(adult[c(2,14)])
+marginplot(adult[c(7,14)])
+
+#occupation missing 5.66% of values
+#workclass missing 5.64% of values
+#native-country missing 1.79& of values
+#Note that half of the missing workclass values occur on observations that are also missing occupation
+```
+
+Examine formats of data available
+
+```{r}
+#Remove leading whitespace
+adult[,c("workclass","education","marital_status","occupation","relationship","race","sex","native_country","income")]=as.data.frame(apply(adult[,c("workclass","education","marital_status","occupation","relationship","race","sex","native_country","income")],2,function(x)gsub('\\s+', '',x)))
+
+#Convert character vars to factors and make list of vars
+adult$workclass <- as.factor(adult$workclass)
+adult$education <- as.factor(adult$education)
+adult$marital_status <- as.factor(adult$marital_status)
+adult$occupation <- as.factor(adult$occupation)
+adult$relationship <- as.factor(adult$relationship)
+adult$race <- as.factor(adult$race)
+adult$sex <- as.factor(adult$sex)
+adult$native_country <- as.factor(adult$native_country)
+adult$income <- as.factor(adult$income)
+
+categorical.explanatory = c("workclass","education","marital_status","occupation","relationship","race","sex","native_country")
+
+str(adult)
+summary(adult)
+```
+
+
+#This is where I started making changes after Rick's contribution above
+
+Notes: 
+ -I corrected white space issue before variable types were corrected
+ -I added additional libraries at top
+
+Remaining missing values visualized
+
+```{r}
+#Proportion and total missing values
+missing=data.frame(miss_var_cumsum(adult))
+missing$prop_miss = missing$n_miss/dim(adult)[1]
+missing[,-3] %>% arrange(-n_miss)
+
+#Chart of missing values by variable
+gg_miss_var(adult)
+```
+
+Looking at categorical variable class balance
+
+```{r}
+cat_vars=adult[,c("workclass","education","marital_status","occupation","relationship","race","sex","native_country","income")]
+
+
+##Notes on Workclass
+#Disproportionate NAs on <=50K
+#Significant difference in self-emp-inc
+#Small differences elsewhere
+ggplot(cat_vars, aes(x= workclass,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="workclass") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+##Notes on Education
+#Assoc-voc and Assoc-acdm only not sig diff
+ggplot(cat_vars, aes(x= education,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="education") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+##Notes on Marital Status
+#Very sig differences in Married-civ-spouse, never-married,and divorced
+ggplot(cat_vars, aes(x= marital_status,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="marital_status") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(cat_vars, aes(x= occupation,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="occupation") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(cat_vars, aes(x= relationship,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="relationship") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(cat_vars, aes(x= race,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="race") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(cat_vars, aes(x= sex,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="sex") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(cat_vars, aes(x= native_country,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="native_country") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+filt_cat_vars=filter(cat_vars, native_country != "United-States")
+summary(filt_cat_vars$native_country)
+
+ggplot(filt_cat_vars, aes(x= native_country,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="native_country") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(cat_vars, aes(x= income)) + geom_bar()
+
+#75.919% of observations are <50K
+dim(cat_vars[cat_vars$income=='<=50K',])[1]/
+  (dim(cat_vars[cat_vars$income=='>50K',])[1]+dim(cat_vars[cat_vars$income=='<=50K',])[1])
+```
+
+Looking at Numerical Variables
+
+```{r}
+num_vars=adult %>% select_if(is.numeric)
+num_vars$income=adult$income
+num_vars$income=factor(num_vars$income)
+variable.names(num_vars)
+plot(num_vars[,1:6])
+
+num_vars %>% ggplot(aes(x=income,y=age))+geom_boxplot()
+
+#older people have higher income
+num_vars %>% ggplot(aes(x=income,y=fnlwgt))+geom_boxplot()
+
+#Education is significantly higher (we should think about if it will cause an issue to include both education variables)
+num_vars %>% ggplot(aes(x=income,y=education_num))+geom_boxplot()
+
+#Investigate probability if gains are more likely for higher income
+num_vars %>% ggplot(aes(x=income,y=capital_gain))+geom_boxplot()
+
+#Testing relation of gains and losses on income
+test1=num_vars
+test2=num_vars
+test1$gains=ifelse(test1$capital_gain>0,'Gain','No Gain')
+test2$losses=ifelse(test1$capital_loss>0,'Loss','No Loss')
+test1$gains=factor(test1$gains)
+test2$losses=factor(test2$losses)
+
+ggplot(test1, aes(x= gains,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="gains") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+ggplot(test2, aes(x= losses,  group=income)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "Percent", fill="gains") +
+    facet_grid(~income) +
+    scale_y_continuous(labels = scales::percent)+coord_flip()+theme(legend.position = "none")
+
+#Investigate probability if losses are more likely for lower income
+num_vars %>% ggplot(aes(x=income,y=capital_loss))+geom_boxplot()
+
+num_vars %>% ggplot(aes(x=income,y=hours_per_week))+geom_boxplot()
+
+#Generate a correlation and significance table and plot for all vars
+res2 <- rcorr(as.matrix(num_vars[,1:6]),type="pearson")
+corrplot(res2$r, type="upper", order="hclust", 
+         p.mat = res2$P, sig.level =  0.1, insig = "blank")
+
+#Test variables with Wilcox Test for significance
+vars_num=variable.names(num_vars[,-7])
+p_matrix= matrix(nrow=length(num_vars)-1, ncol=3)
+for (i in 1:length(vars_num)){
+a=wilcox.test(num_vars[,(i)]~num_vars$income,alternative="two.sided")
+p_matrix[i,1]=vars_num[i]
+p_matrix[i,2]=a[[3]]
+p_matrix[i,3]=ifelse(a[[3]]<=.05,"keep","remove")
+}
+
+p_matrix
+```
+
+Test/Train Split
+
+```{r}
+##Option 1: Remove all NAs
+
+set.seed(1234)
+adult_na_rm = adult[complete.cases(adult), ]
+train_rows1=sample(dim(adult_na_rm)[1],round(dim(adult_na_rm)[1]*.8))
+adult_train1=adult_na_rm[train_rows1,]
+adult_test1=adult_na_rm[-train_rows1,]
+write.csv(adult_train1,"train_na_rm.csv")
+write.csv(adult_test1,"test_na_rm.csv")
+
+dim(adult_train1)
+dim(adult_test1)
+
+
+#Option 2: NAs as a category
+
+set.seed(1234)
+adult_na_as_cat = adult
+adult_na_as_cat$workclass=as.character(adult_na_as_cat$workclass)
+adult_na_as_cat$occupation=as.character(adult_na_as_cat$occupation)
+adult_na_as_cat$native_country=as.character(adult_na_as_cat$native_country)
+adult_na_as_cat[c("workclass", "occupation", "native_country")][is.na(adult_na_as_cat[c("workclass", "occupation", "native_country")])] <- 'no_response'
+adult_na_as_cat$workclass=factor(adult_na_as_cat$workclass)
+adult_na_as_cat$occupation=factor(adult_na_as_cat$occupation)
+adult_na_as_cat$native_country=factor(adult_na_as_cat$native_country)
+train_rows2=sample(dim(adult_na_as_cat)[1],round(dim(adult_na_as_cat)[1]*.8))
+adult_train2=adult_na_as_cat[train_rows2,]
+adult_test2=adult_na_as_cat[-train_rows2,]
+write.csv(adult_train2,"train_na_as_cat.csv")
+write.csv(adult_test2,"test_na_as_cat.csv")
+
+dim(adult_train2)
+dim(adult_test2)
+
+dim(adult)
+dim(adult_na_as_cat)
+dim(adult_na_rm)
+
+# #Option 3 Random Assignment of NAs based on category weight
+# 
+# #missForest
+# library(missForest)
+# 
+# #seed 10% missing values
+# set.seed(1234)
+# adult.mis <- prodNA(adult, noNA = 0.1)
+# summary(adult)
+# summary(adult.mis)
+# 
+# #impute missing values, using all parameters as default values
+# adult.imp <- missForest(adult.mis)
+# 
+# #check imputed values
+# adult.imp$ximp
+# 
+# #check imputation error
+# adult.imp$OOBerror
+# 
+# 
+# #comparing actual data accuracy
+# adult.err <- mixError(adult.imp$ximp, adult.mis, adult)
+# adult.err
+```
+
+
+
+```{r}
+
+```
+
