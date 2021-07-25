@@ -1165,3 +1165,256 @@ confusionMatrix(logit.test$Prediction, logit.test$income.binary)
 car::vif(model)
 ```
 
+Import train/test splits created by Cameron
+
+```{r}
+train_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/train_na_rm.csv", header = TRUE)
+
+test_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/test_na_rm.csv", header = TRUE)
+
+train_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/train_na_as_cat.csv", header = TRUE)
+
+test_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/test_na_as_cat.csv", header = TRUE)
+```
+
+Create Feature lists for models
+
+```{r}
+features.simple = c("age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar")
+
+features.complex = c("age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","age2","age3","education_num2","hours_per_week2")
+
+```
+
+Add features from EDA to the train/test sets
+
+```{r}
+#train_na_rm
+train_na_rm$income.binary<-0
+train_na_rm$income.binary[train_na_rm$income==" >50K"] <- 1
+train_na_rm$income.binary = as.factor(train_na_rm$income.binary)
+
+train_na_rm$marriage_status <- "Other"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Never-married")] <- "Single"
+
+train_na_rm$collar <- "Other"
+train_na_rm$collar[train_na_rm$occupation %in% c("Adm-clerical")] <- "White-support"
+train_na_rm$collar[train_na_rm$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+train_na_rm$collar[train_na_rm$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+train_na_rm$age2 = train_na_rm$age^2
+train_na_rm$age3 = train_na_rm$age^3
+train_na_rm$education_num2 = train_na_rm$education_num^2
+train_na_rm$hours_per_week2 = train_na_rm$hours_per_week^2
+
+train_na_rm$race <- as.factor(train_na_rm$race)
+train_na_rm$sex <- as.factor(train_na_rm$sex)
+train_na_rm$marriage_status <- as.factor(train_na_rm$marriage_status)
+train_na_rm$collar <- as.factor(train_na_rm$collar)
+
+#test_na_rm
+test_na_rm$income.binary<-0
+test_na_rm$income.binary[test_na_rm$income==" >50K"] <- 1
+test_na_rm$income.binary = as.factor(test_na_rm$income.binary)
+
+test_na_rm$marriage_status <- "Other"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Never-married")] <- "Single"
+
+test_na_rm$collar <- "Other"
+test_na_rm$collar[test_na_rm$occupation %in% c("Adm-clerical")] <- "White-support"
+test_na_rm$collar[test_na_rm$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+test_na_rm$collar[test_na_rm$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+test_na_rm$age2 = test_na_rm$age^2
+test_na_rm$age3 = test_na_rm$age^3
+test_na_rm$education_num2 = test_na_rm$education_num^2
+test_na_rm$hours_per_week2 = test_na_rm$hours_per_week^2
+
+test_na_rm$race <- as.factor(test_na_rm$race)
+test_na_rm$sex <- as.factor(test_na_rm$sex)
+test_na_rm$marriage_status <- as.factor(test_na_rm$marriage_status)
+test_na_rm$collar <- as.factor(test_na_rm$collar)
+
+#train_na_as_cat
+train_na_as_cat$income.binary<-0
+train_na_as_cat$income.binary[train_na_as_cat$income==" >50K"] <- 1
+train_na_as_cat$income.binary = as.factor(train_na_as_cat$income.binary)
+
+train_na_as_cat$marriage_status <- "Other"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Never-married")] <- "Single"
+
+train_na_as_cat$collar <- "Other"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Adm-clerical")] <- "White-support"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+train_na_as_cat$age2 = train_na_as_cat$age^2
+train_na_as_cat$age3 = train_na_as_cat$age^3
+train_na_as_cat$education_num2 = train_na_as_cat$education_num^2
+train_na_as_cat$hours_per_week2 = train_na_as_cat$hours_per_week^2
+
+train_na_as_cat$race <- as.factor(train_na_as_cat$race)
+train_na_as_cat$sex <- as.factor(train_na_as_cat$sex)
+train_na_as_cat$marriage_status <- as.factor(train_na_as_cat$marriage_status)
+train_na_as_cat$collar <- as.factor(train_na_as_cat$collar)
+
+#test_na_as_cat
+test_na_as_cat$income.binary<-0
+test_na_as_cat$income.binary[test_na_as_cat$income==" >50K"] <- 1
+test_na_as_cat$income.binary = as.factor(test_na_as_cat$income.binary)
+
+test_na_as_cat$marriage_status <- "Other"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Never-married")] <- "Single"
+
+test_na_as_cat$collar <- "Other"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Adm-clerical")] <- "White-support"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+test_na_as_cat$age2 = test_na_as_cat$age^2
+test_na_as_cat$age3 = test_na_as_cat$age^3
+test_na_as_cat$education_num2 = test_na_as_cat$education_num^2
+test_na_as_cat$hours_per_week2 = test_na_as_cat$hours_per_week^2
+
+test_na_as_cat$race <- as.factor(test_na_as_cat$race)
+test_na_as_cat$sex <- as.factor(test_na_as_cat$sex)
+test_na_as_cat$marriage_status <- as.factor(test_na_as_cat$marriage_status)
+test_na_as_cat$collar <- as.factor(test_na_as_cat$collar)
+
+```
+
+Run Simple Logistic regression with and without NA to compare, add AUC metric
+
+```{r}
+dat.train.x <- train_na_rm %>% select(features.simple)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_rm$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+library(glmnet)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_rm %>% select(features.simple)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_rm$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+
+```
+
+Run Complex Logistic regression with and without NA to compare, add AUC metric
+
+```{r}
+dat.train.x <- train_na_rm %>% select(features.complex)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_rm$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+library(glmnet)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_rm %>% select(features.complex)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_rm$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+```
+
+Run knn-regression with and without NA to compare, add AUC metric
+
+```{r}
+
+```
