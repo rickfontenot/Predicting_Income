@@ -18,6 +18,7 @@ library(vcd)
 install.packages("gtsummary")
 library(gtsummary)
 library(Hmisc)
+library(pROC)
 
 ```
 
@@ -1299,7 +1300,7 @@ test_na_as_cat$collar <- as.factor(test_na_as_cat$collar)
 
 ```
 
-Run Simple Logistic regression with and without NA to compare, add AUC metric
+Run Simple Logistic regression with NA removed, add AUC metric
 
 ```{r}
 dat.train.x <- train_na_rm %>% select(features.simple)
@@ -1357,7 +1358,7 @@ text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
 
 ```
 
-Run Complex Logistic regression with and without NA to compare, add AUC metric
+Run Complex Logistic regression with NA removed, add AUC metric
 
 ```{r}
 dat.train.x <- train_na_rm %>% select(features.complex)
@@ -1413,8 +1414,147 @@ abline(a=0, b= 1)
 text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
 ```
 
-Run knn-regression with and without NA to compare, add AUC metric
+Run Simple Logistic regression with NA as category, add AUC metric
 
 ```{r}
+dat.train.x <- train_na_as_cat %>% select(features.simple)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+library(glmnet)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_as_cat %>% select(features.simple)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+
+```
+
+Run Complex Logistic regression with NA as category, add AUC metric
+
+```{r}
+dat.train.x <- train_na_as_cat %>% select(features.complex)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+library(glmnet)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_as_cat %>% select(features.complex)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+```
+
+Run knn with NA as categoty, optimial k to maximize AUC
+
+```{r}
+train_na_as_cat <- mutate_if(train_na_as_cat, is.character, ~ as.factor(as.factor(.x)))
+train_na_as_cat <- mutate_if(train_na_as_cat, is.factor, ~ as.numeric(as.factor(.x)))
+
+scale = preProcess(train_na_as_cat, method = "range")
+scaled.train_na_as_cat = predict(scale, train_na_as_cat)
+
+knn.predictors = c("age","workclass","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country")
+
+optimal_k = data.frame(AUC = numeric(100), k = numeric(100))
+
+for(i in seq(1, 100, by=1))
+{
+  fit <- class::knn(cl = scaled.train_na_as_cat$income, test = scaled.test_na_as_cat %>% select(knn.predictors), train = scaled.train_na_as_cat %>% select(knn.predictors), k=i, prob = TRUE)
+  roc.perf <- roc(scaled.test_na_as_cat$income, attributes(fit)$prob)
+  optimal_k$AUC[i] = roc.perf$auc*1
+  optimal_k$k[i] = i
+}
+
+optimal_k %>% filter(k>1) %>% ggplot(aes(x = k, y = AUC)) + geom_line()
+
+optimalknn <- class::knn(cl = scaled.train_na_as_cat$income, test = scaled.test_na_as_cat %>% select(knn.predictors), train = scaled.train_na_as_cat %>% select(knn.predictors), k = 30, prob = TRUE)
+
+plot(roc(scaled.test_na_as_cat$income, attributes(optimalknn)$prob), print.thres = T, print.auc=T, asp=1)
+
+confusionMatrix(as.factor(optimalknn), as.factor(scaled.test_na_as_cat$income))
 
 ```
