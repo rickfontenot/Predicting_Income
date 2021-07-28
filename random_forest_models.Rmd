@@ -424,7 +424,7 @@ rf.ROC <- roc(predictor=rf.probs$above_fifty,
                levels=rev(levels(transformed_test$income)))
 rf.ROC$auc
 ```
-This returned the best AUC of 0.9216
+This returned the best AUC
 
 ```{r}
 print(rf_7)
