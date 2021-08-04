@@ -1,0 +1,606 @@
+---
+title: "Cameron_Simple_Model"
+author: "Cameron Stewart"
+date: "7/27/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries
+
+```{r include=FALSE,message=FALSE,warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(VIM)
+library(caret)
+library(corrplot)
+library(ggplot2) 
+library(ggthemes)
+library(naniar)
+library(scales)
+library(stringr)
+library(corrplot)
+library(Hmisc)
+library(ROCR)
+library(glmnet)
+library(gtsummary)
+library(car)
+library(MASS)
+library(pROC)
+library(GGally)
+library(e1071)
+```
+
+
+Load and re-clean Data
+
+```{r}
+adult = read.csv("/Users/Camo/Documents/SMU_DS/Applied Stats/Project2/Predicting_Income/adult.data", header = FALSE)
+
+# NOTE: names using underscore instead of hyphen so they can be referenced easier later
+colnames(adult) <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income")
+
+#Replace "?" with NA and re-do missing value analysis
+adult[, 1:14][adult[, 1:14] == " ?"] <- NA
+
+#Remove leading whitespace
+adult[,c("workclass","education","marital_status","occupation","relationship","race","sex","native_country","income")]=as.data.frame(apply(adult[,c("workclass","education","marital_status","occupation","relationship","race","sex","native_country","income")],2,function(x)gsub('\\s+', '',x)))
+
+#Convert character vars to factors and make list of vars
+adult$workclass <- as.factor(adult$workclass)
+adult$education <- as.factor(adult$education)
+adult$marital_status <- as.factor(adult$marital_status)
+adult$occupation <- as.factor(adult$occupation)
+adult$relationship <- as.factor(adult$relationship)
+adult$race <- as.factor(adult$race)
+adult$sex <- as.factor(adult$sex)
+adult$native_country <- as.factor(adult$native_country)
+adult$income <- as.factor(adult$income)
+```
+
+
+Test/Train Split
+
+```{r}
+##Option 1: Remove all NAs
+
+set.seed(1234)
+adult_na_rm = adult[complete.cases(adult), ]
+train_rows1=sample(dim(adult_na_rm)[1],round(dim(adult_na_rm)[1]*.8))
+adult_train1=adult_na_rm[train_rows1,]
+adult_test1=adult_na_rm[-train_rows1,]
+#write.csv(adult_train1,"train_na_rm.csv")
+#write.csv(adult_test1,"test_na_rm.csv")
+
+dim(adult_train1)
+dim(adult_test1)
+
+
+#Option 2: NAs as a category
+
+set.seed(1234)
+adult_na_as_cat = adult
+adult_na_as_cat$workclass=as.character(adult_na_as_cat$workclass)
+adult_na_as_cat$occupation=as.character(adult_na_as_cat$occupation)
+adult_na_as_cat$native_country=as.character(adult_na_as_cat$native_country)
+adult_na_as_cat[c("workclass", "occupation", "native_country")][is.na(adult_na_as_cat[c("workclass", "occupation", "native_country")])] <- 'no_response'
+adult_na_as_cat$workclass=factor(adult_na_as_cat$workclass)
+adult_na_as_cat$occupation=factor(adult_na_as_cat$occupation)
+adult_na_as_cat$native_country=factor(adult_na_as_cat$native_country)
+train_rows2=sample(dim(adult_na_as_cat)[1],round(dim(adult_na_as_cat)[1]*.8))
+adult_train2=adult_na_as_cat[train_rows2,]
+adult_test2=adult_na_as_cat[-train_rows2,]
+#write.csv(adult_train2,"train_na_as_cat.csv")
+#write.csv(adult_test2,"test_na_as_cat.csv")
+
+# dim(adult_train2)
+# dim(adult_test2)
+# 
+# dim(adult)
+# dim(adult_na_as_cat)
+# dim(adult_na_rm)
+#
+# #Option 3 Random Assignment of NAs based on random forest
+# 
+# #missForest
+# library(missForest)
+# 
+# #seed 10% missing values
+# set.seed(1234)
+# adult.mis <- prodNA(adult, noNA = 0.1)
+# summary(adult)
+# summary(adult.mis)
+# 
+# #impute missing values, using all parameters as default values
+# adult.imp <- missForest(adult.mis)
+# 
+# #check imputed values
+# adult.imp$ximp
+# 
+# #check imputation error
+# adult.imp$OOBerror
+# 
+# 
+# #comparing actual data accuracy
+# adult.err <- mixError(adult.imp$ximp, adult.mis, adult)
+# adult.err
+```
+
+Transforming test and train set categorical variables
+
+```{r}
+
+for (i in 1:4){
+  if (i==1){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=adult_train1
+  }
+  if (i==2){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=adult_test1
+  }
+  if (i==3){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=adult_train2
+  }
+  if (i==4){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=adult_test2
+  }
+
+  
+  #### Rick's re-leveling
+  
+  #Workclass
+  transform_holder$work_sector <- "Other"
+  transform_holder$work_sector[transform_holder$workclass %in% c("Federal-gov","Local-gov","State-gov")] <- "Government"
+  transform_holder$work_sector[transform_holder$workclass %in% c("Private")] <- "Private"
+  transform_holder$work_sector[transform_holder$workclass %in% c("Self-emp-inc","Self-emp-not-inc")] <- "Self_Employed"
+  transform_holder$work_sector[transform_holder$workclass %in% c("Never-worked","Without-pay")] <- "Not_Working"
+  transform_holder$work_sector = as.factor(transform_holder$work_sector)
+  
+  #Marital Status
+  transform_holder$marriage_status <- "Other"
+  transform_holder$marriage_status[transform_holder$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+  transform_holder$marriage_status[transform_holder$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+  transform_holder$marriage_status[transform_holder$marital_status %in% c("Never-married")] <- "Single"
+  transform_holder$marriage_status = as.factor(transform_holder$marriage_status)
+  
+  #Occupation
+  transform_holder$collar <- "Other"
+  transform_holder$collar[transform_holder$occupation %in% c("Adm-clerical")] <- "White-support"
+  transform_holder$collar[transform_holder$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+  ")] <- "White"
+  transform_holder$collar[transform_holder$occupation %in% c("Armed-Forces
+  ","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+  transform_holder$collar = as.factor(transform_holder$collar)
+  
+  #### My Additional Releveling
+  
+  #Capital Gains
+  transform_holder$cap_gains_bin=ifelse(transform_holder$capital_gain>0,'Gain','No Gain')
+  transform_holder$cap_gains_bin=factor(transform_holder$cap_gains_bin)
+  
+  #Capital Losses
+  transform_holder$cap_loss_bin=ifelse(transform_holder$capital_loss>0,'Loss','No Loss')
+  transform_holder$cap_loss_bin=factor(transform_holder$cap_loss_bin)
+  
+  ##### My Experimental Re-leveling
+  
+  ## The purpose is to maximize predictability
+  ##My plan is to test for significance differences for categories with less than 5% of total population. Then combine non-significant differences
+  
+  #Occupation
+  
+  transform_holder$alt_occupation <- as.character(transform_holder$occupation)
+  transform_holder$alt_occupation[transform_holder$occupation %in% c("Tech-support","Protective-serv","Armed-Forces")] <- "Tech_and_Protection"
+  transform_holder$alt_occupation[transform_holder$occupation %in% c("Farming-fishing","Machine-op-inspct")] <- "Agr_and_Mach_Ops"
+  transform_holder$alt_occupation[transform_holder$occupation %in% c("Other-service","Priv-house-serv")] <- "Other-service"
+  transform_holder$alt_occupation = factor(transform_holder$alt_occupation)
+  
+    #Combine Tech-Support, Protective-serv, and Armed forces
+    #Combine Farming-fishing and Machine-op-inspect
+    #Combine Other-Service and Priv-house-serv
+  
+  #sort(summary(transform_holder$alt_occupation)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #occ_model<-glm(income~relevel(alt_occupation, ref = "Tech_and_Protection"),family="binomial",data=transform_holder)
+  #summary(occ_model)
+  
+  #Marital Status
+  
+  transform_holder$alt_marital_status <- as.character(transform_holder$marital_status)
+  transform_holder$alt_marital_status[transform_holder$marital_status %in% c("Separated","Married-spouse-absent")] <- "sep_and_abs_spouse"
+  transform_holder$alt_marital_status[transform_holder$marital_status %in% c("Widowed","Divorced")] <- "Widowed_Divorced"
+  transform_holder$alt_marital_status[transform_holder$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married_with_spouse"
+  transform_holder$alt_marital_status = factor(transform_holder$alt_marital_status)
+  
+    #Combine Separated and Married-spouse-absent
+    #Combine Widowed and Divorced
+    #Combine Married-AF-spouse and Married-civ-spouse
+  
+  #sort(summary(transform_holder$alt_marital_status)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #ms_model<-glm(income~relevel(alt_marital_status, ref = "Married_with_spouse"),family="binomial",data=transform_holder)
+  #summary(ms_model)
+  
+  
+  #Workclass
+  
+  transform_holder$alt_workclass <- as.character(transform_holder$workclass)
+  transform_holder$alt_workclass[transform_holder$workclass %in% c("Without-pay","Never-worked","no_response")] <- "Other"
+  transform_holder$alt_workclass[transform_holder$workclass %in% c("State-gov","Self-emp-not-inc")] <- "state_gov_and_self_emp_non_inc"
+  transform_holder$alt_workclass = factor(transform_holder$alt_workclass)
+  
+    #Combine Without-pay and Never-worked and no_response as other
+    #Combine State-gov and Self-emp-not-inc
+  
+  #sort(summary(transform_holder$alt_workclass)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #wc_model<-glm(income~relevel(alt_workclass, ref = "Federal-gov"),family="binomial",data=transform_holder)
+  #summary(wc_model)
+  
+  #Relationship
+  
+  #transform_holder$alt_relationship <- as.character(transform_holder$relationship)
+  #transform_holder$alt_relationship = factor(transform_holder$alt_relationship)
+  
+    #Left this one the same because all were significantly different
+  
+  #sort(summary(transform_holder$alt_relationship)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #wc_model<-glm(income~relevel(alt_relationship, ref = "Wife"),family="binomial",data=transform_holder)
+  #summary(wc_model)
+  
+  #Race
+  
+  transform_holder$alt_race <- as.character(transform_holder$race)
+  transform_holder$alt_race[transform_holder$race %in% c("White","Asian-Pac-Islander")] <- "White_and_API"
+  transform_holder$alt_race[transform_holder$race %in% c("Amer-Indian-Eskimo","Other")] <- "Other"
+  transform_holder$alt_race = factor(transform_holder$alt_race)
+  
+    #Combine White with Asian-Pac-Islander
+    #Combine Amer-Indian-Eskimo and Other
+    #Made decision not to combine Black and Other despite in-significant difference
+  
+  #sort(summary(transform_holder$alt_race)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #race_model<-glm(income~relevel(alt_race, ref = "Other"),family="binomial",data=transform_holder)
+  #summary(race_model)
+  
+  #Native Country
+  
+  transform_holder$alt_native_country <- as.character(transform_holder$native_country)
+  transform_holder$alt_native_country[!(transform_holder$native_country %in% c("United-States","Mexico","Philippines","no_response"))] <- "Other"
+  transform_holder$alt_native_country[transform_holder$native_country %in% c("United-States","no_response")] <- "US_and_nr"
+  transform_holder$alt_native_country = factor(transform_holder$alt_native_country)
+  
+    #Combine all non US, Mex, and Philippines countries into other
+    #Combine US and no_response
+    #Made decision not to combine Black and Other despite in-significant difference
+  
+  #sort(summary(transform_holder$alt_native_country)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #nc_model<-glm(income~relevel(alt_native_country, ref = "Philippines"),family="binomial",data=transform_holder)
+  #summary(nc_model)
+  
+  
+  #Education
+  transform_holder$alt_education <- as.character(transform_holder$education)
+  transform_holder$alt_education[transform_holder$education %in% c("Assoc-acdm","Assoc-voc","Preschool")] <- "Assoc_and_Prek"
+  transform_holder$alt_education[transform_holder$education %in% c("9th","7th-8th","11th","5th-6th","1st-4th","10th")] <- "1st-11th"
+  transform_holder$alt_education[transform_holder$education %in% c("Doctorate","Prof-school")] <- "Doctorate and Prof School"
+  transform_holder$alt_education = factor(transform_holder$alt_education)
+  
+    #Combine Assoc-acdm and Assoc-voc and Preschool
+    #Combine 1st - 11th
+    #Combine Doctorate and Prof-school
+  
+  #sort(summary(transform_holder$alt_education)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #edu_model<-glm(income~relevel(alt_education, ref = "12th"),family="binomial",data=transform_holder)
+  #summary(edu_model)
+
+  if (i==1){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    train1=transform_holder
+  }
+  if (i==2){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    test1=transform_holder
+  }
+  if (i==3){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    train2=transform_holder
+  }
+  if (i==4){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    test2=transform_holder
+  }
+  
+}
+# dim(adult)
+# dim(test1)
+# dim(test2)
+# dim(train1)
+# dim(train2)
+# 
+# str(test1)
+# str(test2)
+# str(train1)
+# str(train2)
+```
+
+
+Using LASSO and stepwise to evaluate model (LASSO can only have numerical predictors only)
+
+```{r}
+#Adding polynomial terms based on Rick's analysis
+#He suggested squared term for hpw and cube for age
+train2$age_squared=train2$age^2
+train2$age_cubed=train2$age^3
+train2$hours_per_week_squared=train2$hours_per_week^2
+variable.names(train2)
+
+otrain2=train2[,c(15,1:2,4:14)]
+ctrain2=train2[,c(15,1,5,8,10,13,19,20,21:26)]
+ctrain2_complex=train2[,c(15,1,27:28,5,8,10,13,29,19,20,21:26)]
+rtrain2=train2[,c(15,1,5,8:10,13,16:20)]
+rtrain2_complex=train2[,c(15,1,27:28,5,8:10,13,29,16:20)]
+
+train_num_vars=ctrain2 %>% select_if(is.numeric)
+train_num_vars$income=ctrain2$income
+train_num_vars$income=factor(train_num_vars$income)
+train_lasso=train_num_vars[,c(4,1:3)]
+full.log<-glm(income~.-education_num,family="binomial",data=ctrain2)
+full.log<-glm(income~.-alt_education,family="binomial",data=ctrain2)
+full.log<-glm(income~.,family="binomial",data=ctrain2)
+summary(full.log)
+# 
+# #AIC 17331 for full model with both edu num and cat
+#   #VIF of 6.12 on edu_num when combined
+# #AIC 17336 for full model with edu num only
+#   #VIF of 4.29 on workclass
+# #AIC 17348 for full model with edu cat only
+#   #VIF of 4.32 highest on workclass
+# 
+# #Stepwise selection on AIC
+# step.log<-full.log %>% stepAIC(trace=FALSE)
+# summary(step.log)
+# exp(cbind("Odds ratio" = coef(step.log), confint.default(step.log, level = 0.95)))
+# vif(full.log)
+# 
+# #Stepwise above wouldn't remove any variables
+# 
+# #LASSO for adult_train1
+# dat.train.x <- model.matrix(income~.,train_lasso)
+# variable.names(train_lasso)
+# dat.train.y<-train_lasso[,1]
+# cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+# plot(cvfit)
+# coef(cvfit, s = "lambda.min")
+# print("CV Error Rate:")
+# cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+# 
+# #Optimal penalty
+# print("Penalty Value:")
+# cvfit$lambda.min
+# 
+# #For final model predictions go ahead and refit lasso using entire
+# #data set
+# finalmodel<-glmnet(dat.train.x, dat.train.y, family = "binomial",lambda=cvfit$lambda.min)
+# 
+# variable.names(test2)
+# variable.names(train_lasso)
+# lasso_test=test2[,c(15,1,3,5,11,12,13)]
+# lasso_test=test2
+# dat.test.x<-model.matrix(income~age+fnlwgt+education_num+capital_gain+capital_loss+hours_per_week,lasso_test)
+# fit.pred.lasso <- predict(finalmodel, newx = dat.test.x, type = "response")
+# 
+# lasso_test$income[1:15]
+# fit.pred.lasso[1:15]
+# 
+# #Making predictions for stepwise as well for later
+# fit.pred.step<-predict(step.log,newdata=lasso_test,type="response")
+# 
+# #Lets use the predicted probablities to classify the observations and make a final confusion matrix for the two models.  We can use it to calculate error metrics.
+# #Lets use a cutoff of 0.5 to make the classification.
+# cutoff<-0.5
+# class.lasso<-factor(ifelse(fit.pred.lasso>cutoff,">50K","<=50K"),levels=c("<=50K",">50K"))
+# class.step<-factor(ifelse(fit.pred.step>cutoff,">50K","<=50K"),levels=c("<=50K",">50K"))
+# 
+# #Confusion Matrix for Lasso
+# conf.lasso<-table(class.lasso,lasso_test$income)
+# print("Confusion matrix for LASSO")
+# conf.lasso
+# 
+# conf.step<-table(class.step,lasso_test$income)
+# print("Confusion matrix for Stepwise")
+# conf.step
+# 
+# #Accuracy of LASSO and Stepwise
+# print("Overall accuracy for LASSO and Stepwise respectively")
+# sum(diag(conf.lasso))/sum(conf.lasso)
+# sum(diag(conf.step))/sum(conf.step)
+# 
+# print("Alternative calculations of accuracy")
+# #Rather than making the calculations from the table, we can compute them more quickly using the following code which just checks if the prediction matches the truth and then computes the proportion.
+# mean(class.lasso==lasso_test$income)
+# mean(class.step==lasso_test$income)
+# 
+# cutoff<-0.3
+# class.step<-factor(ifelse(fit.pred.step>cutoff,">50K","<=50K"),levels=c("<=50K",">50K"))
+# conf.step<-table(class.step,lasso_test$income)
+# conf.step
+# mean(class.step==lasso_test$income)
+# 
+# cutoff<-0.7
+# class.step<-factor(ifelse(fit.pred.step>cutoff,">50K","<=50K"),levels=c("<=50K",">50K"))
+# conf.step<-table(class.step,lasso_test$income)
+# conf.step
+# mean(class.step==lasso_test$income)
+# 
+# results.lasso<-prediction(fit.pred.lasso, lasso_test$income,label.ordering=c("<=50K",">50K"))
+# roc.lasso = performance(results.lasso, measure = "tpr", x.measure = "fpr")
+# plot(roc.lasso,colorize = TRUE)
+# abline(a=0, b= 1)
+# 
+# results.step<-prediction(fit.pred.step, lasso_test$income,label.ordering=c("<=50K",">50K"))
+# roc.step = performance(results.step, measure = "tpr", x.measure = "fpr")
+# 
+# 
+# simple.log<-glm(income~.,family="binomial",data=train_lasso)
+# fit.pred.origin<-predict(simple.log,newdata=lasso_test,type="response")
+# results.origin<-prediction(fit.pred.origin,lasso_test$income,label.ordering=c("<=50K",">50K"))
+# roc.origin=performance(results.origin,measure = "tpr", x.measure = "fpr")
+# 
+# plot( roc.lasso)
+# plot(roc.step,col="orange", add = TRUE)
+# plot(roc.origin,col="blue",add=TRUE)
+# legend("bottomright",legend=c("Lasso","Stepwise","Full Model"),col=c("black","orange","blue"),lty=1,lwd=1)
+# abline(a=0, b= 1)
+```
+
+Creating Simple Model
+
+```{r}
+library(pROC)
+library(GGally)
+library(e1071)  #New package  (logisitic)
+
+full.log1<-glm(income~.-education_num,family="binomial",data=ctrain2)
+full.log2<-glm(income~.-alt_education,family="binomial",data=ctrain2)
+full.log3<-glm(income~.,family="binomial",data=ctrain2)
+
+#vif(full.log3)
+summary(full.log3)
+#AUC full.log1=.8955, full.log2=.8955, full.log3=.8957
+#education_num has VIF of 6 which is high and is tied with alt_education
+
+#Dumping alt_education because it is not significant in the summary and education_num is
+#vif(full.log2)
+#Now workclass is the highest multicollinearity at 4.29 which is below acceptable threshold
+
+#Looking at the summary of full.log2
+summary(full.log2)
+#Race is the only non-significant variable so will try removing it
+
+#Model without Race has AUC of .8952
+full.log4<-glm(income~.-alt_education-alt_race,family="binomial",data=ctrain2)
+summary(full.log4)
+
+#Model without native_country has AUC of .8954
+full.log5<-glm(income~.-alt_education-alt_native_country,family="binomial",data=ctrain2)
+summary(full.log5)
+
+
+# #Manually adjusting threshhold
+# threshold=.209
+# log.predclass<-ifelse(predprobs>threshold,">50K","<=50K")
+# log.predclass<-factor(log.predclass)
+# confusionMatrix(log.predclass,test2$income)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log1,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log2,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+str(ctrain2)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log3,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log4,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log5,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+###Trying out Rick's transformations with full model and parsed model
+full.log_rick<-glm(income~.,family="binomial",data=rtrain2)
+
+#vif(full.log_rick)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log_rick,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(full.log_rick)
+
+###Trying out Original data with full model and parsed model
+str(otrain2)
+full.log_orig<-glm(income~.,family="binomial",data=otrain2)
+summary(full.log_orig)
+#vif(full.log_orig)
+
+#Compute ROC curve on the full.log model against test set
+predprobs<-predict(full.log_orig,test2,type="response")
+log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+```
+
+Looking at more complex models
+
+```{r}
+# full.log_complex<-glm(income~.+I(ctrain2$education_num^2),family="binomial",data=ctrain2_complex)
+# 
+# #Compute ROC curve on the full.log model against test set
+# predprobs<-predict(full.log_complex,test2,type="response")
+# log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+# plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+# auc(log.roc)
+# 
+# ###Trying out Original data with full model and parsed model
+# full.log_orig_complex<-glm(income~.+education_num^2+hours_per_week^2+age^2+age^3,family="binomial",data=otrain2)
+# summary(full.log_orig_complex)
+# 
+# #Compute ROC curve on the full.log model against test set
+# predprobs<-predict(full.log_orig_complex,test2,type="response")
+# log.roc<-roc(response=test2$income,predictor=predprobs,levels=c("<=50K",">50K"))
+# plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+# auc(log.roc)
+```
+
+
+Plotting logistic curve for simple models
+
+```{r}
+
+
+# #age vs income logistic regression curve
+# ctrain2 %>%
+#   mutate(prob = ifelse(income == ">50K", 1, 0)) %>%
+#   ggplot(aes(age, prob)) +
+#   geom_point(alpha = 0.2) +
+#   geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+#   labs(
+#     title = "Logistic Regression Model", 
+#     x = "age",
+#     y = "P(income >50K)"
+#     )
+```
+
