@@ -14,7 +14,9 @@ pacman::p_load(
   smotefamily,
   ROSE,
   h2o,
-  pROC
+  pROC,
+  tree,
+  ROCR
 )
 ```
 
@@ -178,162 +180,157 @@ adult[is.na(adult)] = "null"
 
 adult[,factors_list] <- lapply(adult[,factors_list], as.factor)
 adult$income <- as.factor(adult$income)
+
+adult <- adult[,!(names(adult) %in% c('education', 'fnlwgt'))]
 ```
 
 First, look at only quantitative variables
 ```{r}
-set.seed(123)
-smp_size <- floor(0.8 * nrow(adult))
-train_ind <- sample(seq_len(nrow(adult)), size = smp_size)
-train <- adult[train_ind, c("age", "fnlwgt", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
-test <- adult[-train_ind, c("age", "fnlwgt", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
+set.seed(1234)
+train_ind = sample(dim(adult)[1],round(dim(adult)[1]*.8))
+train <- adult[train_ind, c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
+test <- adult[-train_ind, c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
 ```
 
-Normal RF with ROC metric
 ```{r}
 ctrl <- trainControl(method = "cv",
                      number = 3,
                      classProbs = T,
                      summaryFunction = twoClassSummary)
+```
 
+Normal RF with ROC metric
+```{r}
 rf_1 <- train(income~., 
                       data=train, 
                       method='rf', 
                       metric='ROC',
                       trControl = ctrl)
 
-prediction <- predict(rf_1, newdata = test)
-confusionMatrix(table(prediction, test$income))
+probability <- predict(rf_1, newdata = test, type = "prob")
 
-rf.probs <- predict(rf_1, test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))
-rf.ROC$auc
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc
 ```
 
-Normal RF with Accuracy metric
 ```{r}
-ctrl <- trainControl(method = "cv",
-                     number = 3,
-                     classProbs = T)
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
 
-rf_2 <- train(income~., 
-                      data=train, 
-                      method='rf', 
-                      metric='Accuracy',
-                      trControl = ctrl)
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, test$income))
 
-prediction <- predict(rf_2, newdata = test)
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
 confusionMatrix(table(prediction, test$income))
-
-rf.probs <- predict(rf_2, test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))
-rf.ROC$auc
 ```
 
 ```{r}
 #SMOTE only takes quantitative variables
 train$income <- as.factor(train$income)
 table(train$income)
-new_train <- SMOTE(X = train[,c("age", "fnlwgt", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week")], target = train[,"income"], K = 5, dup_size = 6)$data
+new_train <- SMOTE(X = train[,c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week")], target = train[,"income"], K = 5, dup_size = 6)$data
 colnames(new_train)[colnames(new_train) == 'class'] <- 'income'
 table(new_train$income)
 ```
 
-SMOTE RF with ROC metric
+SMOTE RF with default split at .5
 ```{r}
-ctrl <- trainControl(method = "cv",
-                     number = 3,
-                     classProbs = T,
-                     summaryFunction = twoClassSummary)
-
 rf_3 <- train(income~., 
                       data=new_train, 
                       method='rf', 
                       metric='ROC',
                       trControl = ctrl)
 
-prediction <- predict(rf_3, newdata = test)
-confusionMatrix(table(prediction, test$income))
-
-rf.probs <- predict(rf_3, test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
+probability <- predict(rf_3, test, type="prob")
+roc(predictor=probability$above_fifty,
                response=test$income,
-               levels=rev(levels(test$income)))
-rf.ROC$auc
+               levels=rev(levels(test$income)))$auc
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test$income))
 ```
 
-SMOTE RF with Accuracy metric
+SMOTE RF with optimized split
 ```{r}
-
-ctrl <- trainControl(method = "cv",
-                     number = 3)
-
 rf_4 <- train(income~., 
                       data=new_train, 
                       method='rf', 
-                      metric='Accuracy',
+                      metric='ROC',
                       trControl = ctrl)
 
-prediction <- predict(rf_4, newdata = test)
-confusionMatrix(table(prediction, test$income))
+probability <- predict(rf_4, newdata = test, type = "prob")
 
-rf.probs <- predict(rf_4, test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))
-rf.ROC$auc
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc
 ```
 
-ROSE RF with AUC metric
 ```{r}
-library(ROSE)
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test$income))
+```
+
+ROSE RF
+```{r}
 #ROSE only takes quantitative variables
 table(train$income)
-rose_train <- train[,c("age", "fnlwgt", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
+rose_train <- train[,c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
 rose_train <- ROSE(income ~ ., data = rose_train, N = 25000)$data
 table(rose_train$income)
 ```
 
-ROSE RF with ROC metric
 ```{r}
-ctrl <- trainControl(method = "cv",
-                     number = 3,
-                     classProbs = T,
-                     summaryFunction = twoClassSummary)
-
 rf_5 <- train(income~., 
                       data=rose_train, 
                       method='rf', 
                       metric='ROC',
                       trControl = ctrl)
 
-prediction <- predict(rf_5, newdata = test)
-true_value <- test$income
+probability <- predict(rf_5, newdata = test, type = "prob")
 
-results <- data.frame(prediction, true_value)
-confusionMatrix(results$prediction, results$true_value)
-
-rf.probs <- predict(rf_5, test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))
-rf.ROC$auc
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc
 ```
 
 ```{r}
 head(rose_train)
 ```
 
+
 Target Encoding for Categorical Variables
 ```{r}
 train_h20 <- adult[train_ind,]
 test_h2o <- adult[-train_ind,]
-train_h20 <- train_h20[,!(names(train_h20) %in% c('education'))]
-test_h2o <- test_h2o[,!(names(test_h2o) %in% c('education'))]
 ```
 
 ```{r}
@@ -372,7 +369,7 @@ transformed_train = transformed_train[,!(names(transformed_train) %in% c(encoded
 transformed_test = transformed_test[,!(names(transformed_test) %in% c(encoded_columns, "fold"))]
 ```
 
-Target Encoding RF with ROC metric
+Target Encoding RF
 ```{r}
 ctrl <- trainControl(method = "cv",
                      number = 5,
@@ -385,15 +382,36 @@ rf_6 <- train(income~.,
                       metric='ROC',
                       trControl = ctrl)
 
-prediction <- predict(rf_6, newdata = transformed_test)
-prediction_df <- data.frame(prediction, transformed_test$income)
-confusionMatrix(table(prediction, transformed_test$income))
+probability <- predict(rf_6, newdata = transformed_test, type = "prob")
 
-rf.probs <- predict(rf_6, transformed_test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
-               response=transformed_test$income,
-               levels=rev(levels(transformed_test$income)))
-rf.ROC$auc
+roc(predictor=probability$above_fifty,
+    response=transformed_test$income,
+    levels=rev(levels(transformed_test$income)))$auc
+```
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, transformed_test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, transformed_test$income))
 ```
 
 ```{r}
@@ -401,10 +419,27 @@ print(rf_6)
 varImp(rf_6)
 ```
 
-Target Encoding Ranger with ROC metric
+```{r}
+pred <- prediction(probability[,2], transformed_test$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+
+Target Encoding Ranger
 ```{r}
 ctrl <- trainControl(method = "cv",
                      number = 5,
+                     repeats = 3,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+ctrl <- trainControl(method = "cv",
+                     repeats = 3,
                      classProbs = T,
                      summaryFunction = twoClassSummary)
 
@@ -414,15 +449,36 @@ rf_7 <- train(income~.,
                       metric='ROC',
                       trControl = ctrl)
 
-prediction <- predict(rf_7, newdata = transformed_test)
-prediction_df <- data.frame(prediction, transformed_test$income)
-confusionMatrix(table(prediction, transformed_test$income))
+probability <- predict(rf_7, newdata = transformed_test, type = "prob")
 
-rf.probs <- predict(rf_7, transformed_test, type="prob")
-rf.ROC <- roc(predictor=rf.probs$above_fifty,
-               response=transformed_test$income,
-               levels=rev(levels(transformed_test$income)))
-rf.ROC$auc
+roc(predictor=probability$above_fifty,
+    response=transformed_test$income,
+    levels=rev(levels(transformed_test$income)))$auc
+```
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 100000) > 0, ceiling(min(probability$above_fifty) * 100000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 100000) == 100000, 99999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 100000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, transformed_test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, transformed_test$income))
 ```
 This returned the best AUC
 
@@ -431,5 +487,71 @@ print(rf_7)
 ```
 
 ```{r}
+pred <- prediction(probability[,2], test$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+```{r}
 h2o.shutdown(prompt = F)
+```
+
+```{r}
+train_full <- adult[train_ind,]
+test_full <- adult[-train_ind,]
+```
+
+One Hot Encoded RF
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+rf_8 <- train(income~., 
+                      data=train_full, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_8, newdata = test_full, type = "prob")
+
+roc(predictor=probability$above_fifty,
+    response=test_full$income,
+    levels=rev(levels(test_full$income)))$auc
+```
+
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, test_full$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test_full$income))
+```
+
+```{r}
+print(rf_8)
+varImp(rf_8)
 ```
