@@ -1,0 +1,763 @@
+---
+title: "Income_Simple_Model_2"
+author: "Cameron Stewart"
+date: "8/4/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE,message=FALSE}
+library(glmnet)
+library(ROCR)
+library(MASS)
+library(ggplot2)
+library(pheatmap)
+library(randomForest)
+library(dplyr)
+library(tidyverse)
+library(VIM)
+library(caret)
+library(corrplot)
+library(ggplot2) 
+library(ggthemes)
+library(vcd)
+library(gtsummary)
+library(Hmisc)
+library(pROC)
+
+```
+
+Bring in train/test data:
+```{r}
+train_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/train_na_rm.csv", header = TRUE,stringsAsFactors = TRUE)
+
+test_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/test_na_rm.csv", header = TRUE,stringsAsFactors = TRUE)
+
+train_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/train_na_as_cat.csv", header = TRUE,stringsAsFactors = TRUE)
+
+test_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/test_na_as_cat.csv", header = TRUE,stringsAsFactors = TRUE)
+```
+
+Add features from EDA to the train/test sets
+
+```{r}
+
+train_na_rm=train_na_rm[,-1]
+test_na_rm=test_na_rm[,-1]
+train_na_as_cat=train_na_as_cat[,-1]
+test_na_as_cat=test_na_as_cat[,-1]
+
+#train_na_rm
+train_na_rm$income.binary<-0
+train_na_rm$income.binary[train_na_rm$income==" >50K"] <- 1
+train_na_rm$income.binary = as.factor(train_na_rm$income.binary)
+
+train_na_rm$marriage_status <- "Other"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Never-married")] <- "Single"
+
+train_na_rm$collar <- "Other"
+train_na_rm$collar[train_na_rm$occupation %in% c("Adm-clerical")] <- "White-support"
+train_na_rm$collar[train_na_rm$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+train_na_rm$collar[train_na_rm$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+train_na_rm$age2 = train_na_rm$age^2
+train_na_rm$age3 = train_na_rm$age^3
+train_na_rm$education_num2 = train_na_rm$education_num^2
+train_na_rm$hours_per_week2 = train_na_rm$hours_per_week^2
+
+train_na_rm$race <- as.factor(train_na_rm$race)
+train_na_rm$sex <- as.factor(train_na_rm$sex)
+train_na_rm$marriage_status <- as.factor(train_na_rm$marriage_status)
+train_na_rm$collar <- as.factor(train_na_rm$collar)
+
+#test_na_rm
+test_na_rm$income.binary<-0
+test_na_rm$income.binary[test_na_rm$income==" >50K"] <- 1
+test_na_rm$income.binary = as.factor(test_na_rm$income.binary)
+
+test_na_rm$marriage_status <- "Other"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Never-married")] <- "Single"
+
+test_na_rm$collar <- "Other"
+test_na_rm$collar[test_na_rm$occupation %in% c("Adm-clerical")] <- "White-support"
+test_na_rm$collar[test_na_rm$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+test_na_rm$collar[test_na_rm$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+test_na_rm$age2 = test_na_rm$age^2
+test_na_rm$age3 = test_na_rm$age^3
+test_na_rm$education_num2 = test_na_rm$education_num^2
+test_na_rm$hours_per_week2 = test_na_rm$hours_per_week^2
+
+test_na_rm$race <- as.factor(test_na_rm$race)
+test_na_rm$sex <- as.factor(test_na_rm$sex)
+test_na_rm$marriage_status <- as.factor(test_na_rm$marriage_status)
+test_na_rm$collar <- as.factor(test_na_rm$collar)
+
+#train_na_as_cat
+train_na_as_cat$income.binary<-0
+train_na_as_cat$income.binary[train_na_as_cat$income==" >50K"] <- 1
+train_na_as_cat$income.binary = as.factor(train_na_as_cat$income.binary)
+
+train_na_as_cat$marriage_status <- "Other"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Never-married")] <- "Single"
+
+train_na_as_cat$collar <- "Other"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Adm-clerical")] <- "White-support"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+train_na_as_cat$age2 = train_na_as_cat$age^2
+train_na_as_cat$age3 = train_na_as_cat$age^3
+train_na_as_cat$education_num2 = train_na_as_cat$education_num^2
+train_na_as_cat$hours_per_week2 = train_na_as_cat$hours_per_week^2
+
+train_na_as_cat$race <- as.factor(train_na_as_cat$race)
+train_na_as_cat$sex <- as.factor(train_na_as_cat$sex)
+train_na_as_cat$marriage_status <- as.factor(train_na_as_cat$marriage_status)
+train_na_as_cat$collar <- as.factor(train_na_as_cat$collar)
+
+#test_na_as_cat
+test_na_as_cat$income.binary<-0
+test_na_as_cat$income.binary[test_na_as_cat$income==" >50K"] <- 1
+test_na_as_cat$income.binary = as.factor(test_na_as_cat$income.binary)
+
+test_na_as_cat$marriage_status <- "Other"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Never-married")] <- "Single"
+
+test_na_as_cat$collar <- "Other"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Adm-clerical")] <- "White-support"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+test_na_as_cat$age2 = test_na_as_cat$age^2
+test_na_as_cat$age3 = test_na_as_cat$age^3
+test_na_as_cat$education_num2 = test_na_as_cat$education_num^2
+test_na_as_cat$hours_per_week2 = test_na_as_cat$hours_per_week^2
+
+test_na_as_cat$race <- as.factor(test_na_as_cat$race)
+test_na_as_cat$sex <- as.factor(test_na_as_cat$sex)
+test_na_as_cat$marriage_status <- as.factor(test_na_as_cat$marriage_status)
+test_na_as_cat$collar <- as.factor(test_na_as_cat$collar)
+```
+
+Adding my custom predictors
+```{r}
+
+for (i in 1:4){
+  if (i==1){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=train_na_rm
+  }
+  if (i==2){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=test_na_rm
+  }
+  if (i==3){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=train_na_as_cat
+  }
+  if (i==4){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    transform_holder=test_na_as_cat
+  }
+  
+transform_holder$work_sector <- "Other"
+transform_holder$work_sector[transform_holder$workclass %in% c("Federal-gov","Local-gov","State-gov")] <- "Government"
+transform_holder$work_sector[transform_holder$workclass %in% c("Private")] <- "Private"
+transform_holder$work_sector[transform_holder$workclass %in% c("Self-emp-inc","Self-emp-not-inc")] <- "Self_Employed"
+transform_holder$work_sector[transform_holder$workclass %in% c("Never-worked","Without-pay")] <- "Not_Working"
+transform_holder$work_sector = as.factor(transform_holder$work_sector)
+  
+  #### My Additional Releveling
+  
+  #Capital Gains
+  transform_holder$cap_gains_bin=ifelse(transform_holder$capital_gain>0,'Gain','No Gain')
+  transform_holder$cap_gains_bin=factor(transform_holder$cap_gains_bin)
+  
+  #Capital Losses
+  transform_holder$cap_loss_bin=ifelse(transform_holder$capital_loss>0,'Loss','No Loss')
+  transform_holder$cap_loss_bin=factor(transform_holder$cap_loss_bin)
+  
+  ##### My Experimental Re-leveling
+  
+  ## The purpose is to maximize predictability
+  ##My plan is to test for significance differences for categories with less than 5% of total population. Then combine non-significant differences
+  
+  #Occupation
+  
+  transform_holder$alt_occupation <- as.character(transform_holder$occupation)
+  transform_holder$alt_occupation[transform_holder$occupation %in% c("Tech-support","Protective-serv","Armed-Forces")] <- "Tech_and_Protection"
+  transform_holder$alt_occupation[transform_holder$occupation %in% c("Farming-fishing","Machine-op-inspct")] <- "Agr_and_Mach_Ops"
+  transform_holder$alt_occupation[transform_holder$occupation %in% c("Other-service","Priv-house-serv")] <- "Other-service"
+  transform_holder$alt_occupation = factor(transform_holder$alt_occupation)
+  
+    #Combine Tech-Support, Protective-serv, and Armed forces
+    #Combine Farming-fishing and Machine-op-inspect
+    #Combine Other-Service and Priv-house-serv
+  
+  #sort(summary(transform_holder$alt_occupation)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #occ_model<-glm(income~relevel(alt_occupation, ref = "Tech_and_Protection"),family="binomial",data=transform_holder)
+  #summary(occ_model)
+  
+  #Marital Status
+  
+  transform_holder$alt_marital_status <- as.character(transform_holder$marital_status)
+  transform_holder$alt_marital_status[transform_holder$marital_status %in% c("Separated","Married-spouse-absent")] <- "sep_and_abs_spouse"
+  transform_holder$alt_marital_status[transform_holder$marital_status %in% c("Widowed","Divorced")] <- "Widowed_Divorced"
+  transform_holder$alt_marital_status[transform_holder$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married_with_spouse"
+  transform_holder$alt_marital_status = factor(transform_holder$alt_marital_status)
+  
+    #Combine Separated and Married-spouse-absent
+    #Combine Widowed and Divorced
+    #Combine Married-AF-spouse and Married-civ-spouse
+  
+  #sort(summary(transform_holder$alt_marital_status)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #ms_model<-glm(income~relevel(alt_marital_status, ref = "Married_with_spouse"),family="binomial",data=transform_holder)
+  #summary(ms_model)
+  
+  
+  #Workclass
+  
+  transform_holder$alt_workclass <- as.character(transform_holder$workclass)
+  transform_holder$alt_workclass[transform_holder$workclass %in% c("Without-pay","Never-worked","no_response")] <- "Other"
+  transform_holder$alt_workclass[transform_holder$workclass %in% c("State-gov","Self-emp-not-inc")] <- "state_gov_and_self_emp_non_inc"
+  transform_holder$alt_workclass = factor(transform_holder$alt_workclass)
+  
+    #Combine Without-pay and Never-worked and no_response as other
+    #Combine State-gov and Self-emp-not-inc
+  
+  #sort(summary(transform_holder$alt_workclass)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #wc_model<-glm(income~relevel(alt_workclass, ref = "Federal-gov"),family="binomial",data=transform_holder)
+  #summary(wc_model)
+  
+  #Relationship
+  
+  #transform_holder$alt_relationship <- as.character(transform_holder$relationship)
+  #transform_holder$alt_relationship = factor(transform_holder$alt_relationship)
+  
+    #Left this one the same because all were significantly different
+  
+  #sort(summary(transform_holder$alt_relationship)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #wc_model<-glm(income~relevel(alt_relationship, ref = "Wife"),family="binomial",data=transform_holder)
+  #summary(wc_model)
+  
+  #Race
+  
+  transform_holder$alt_race <- as.character(transform_holder$race)
+  transform_holder$alt_race[transform_holder$race %in% c("White","Asian-Pac-Islander")] <- "White_and_API"
+  transform_holder$alt_race[transform_holder$race %in% c("Amer-Indian-Eskimo","Other")] <- "Other"
+  transform_holder$alt_race = factor(transform_holder$alt_race)
+  
+    #Combine White with Asian-Pac-Islander
+    #Combine Amer-Indian-Eskimo and Other
+    #Made decision not to combine Black and Other despite in-significant difference
+  
+  #sort(summary(transform_holder$alt_race)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #race_model<-glm(income~relevel(alt_race, ref = "Other"),family="binomial",data=transform_holder)
+  #summary(race_model)
+  
+  #Native Country
+  
+  transform_holder$alt_native_country <- as.character(transform_holder$native_country)
+  transform_holder$alt_native_country[!(transform_holder$native_country %in% c("United-States","Mexico","Philippines","no_response"))] <- "Other"
+  transform_holder$alt_native_country[transform_holder$native_country %in% c("United-States","no_response")] <- "US_and_nr"
+  transform_holder$alt_native_country = factor(transform_holder$alt_native_country)
+  
+    #Combine all non US, Mex, and Philippines countries into other
+    #Combine US and no_response
+    #Made decision not to combine Black and Other despite in-significant difference
+  
+  #sort(summary(transform_holder$alt_native_country)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #nc_model<-glm(income~relevel(alt_native_country, ref = "Philippines"),family="binomial",data=transform_holder)
+  #summary(nc_model)
+  
+  
+  #Education
+  transform_holder$alt_education <- as.character(transform_holder$education)
+  transform_holder$alt_education[transform_holder$education %in% c("Assoc-acdm","Assoc-voc","Preschool")] <- "Assoc_and_Prek"
+  transform_holder$alt_education[transform_holder$education %in% c("9th","7th-8th","11th","5th-6th","1st-4th","10th")] <- "1st-11th"
+  transform_holder$alt_education[transform_holder$education %in% c("Doctorate","Prof-school")] <- "Doctorate and Prof School"
+  transform_holder$alt_education = factor(transform_holder$alt_education)
+  
+    #Combine Assoc-acdm and Assoc-voc and Preschool
+    #Combine 1st - 11th
+    #Combine Doctorate and Prof-school
+  
+  #sort(summary(transform_holder$alt_education)/dim(transform_holder)[1],decreasing = TRUE)
+  
+  #edu_model<-glm(income~relevel(alt_education, ref = "12th"),family="binomial",data=transform_holder)
+  #summary(edu_model)
+
+  if (i==1){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    train_na_rm=transform_holder
+  }
+  if (i==2){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    test_na_rm=transform_holder
+  }
+  if (i==3){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    train_na_as_cat=transform_holder
+  }
+  if (i==4){  
+    #Transform holder allows me to copy and paste transform code to multiple test and training sets with ease
+    test_na_as_cat=transform_holder
+  }
+  
+}
+```
+
+Create Feature lists for models
+
+```{r}
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar")
+
+features.complex = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","age2","age3","education_num2","hours_per_week2")
+
+original.variables <- c("income","age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country")
+```
+
+Base Logistic regression model with all original variables for comparison
+
+```{r}
+dat.train.x <- train_na_rm %>% select(all_of(original.variables))
+dat.train.x <- model.matrix(income~.,dat.train.x)
+dat.train.y <- train_na_rm$income
+
+#glmnet requires a matrix 
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 100)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get Test Set
+dat.val1.x <- test_na_rm %>% select(all_of(original.variables))
+dat.val1.x <- model.matrix(income~.,dat.val1.x)
+dat.val1.y <- test_na_rm$income
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+```
+
+Run Simple Logistic regression with NA removed, add AUC metric
+
+```{r}
+dat.train.x <- train_na_rm %>% select(all_of(features.simple))
+dat.train.x <- model.matrix(income~.,dat.train.x)
+dat.train.y <- train_na_rm$income
+
+#glmnet requires a matrix 
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 100)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get Test Set
+dat.val1.x <- test_na_rm %>% select(all_of(features.simple))
+dat.val1.x <- model.matrix(income~.,dat.val1.x)
+dat.val1.y <- test_na_rm$income
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+```
+
+Run Simple Logistic regression with NA as category, add AUC metric
+
+```{r}
+dat.train.x <- train_na_as_cat %>% select(all_of(features.simple))
+dat.train.x <- model.matrix(income~.,dat.train.x)
+dat.train.y <- train_na_as_cat$income
+
+#glmnet requires a matrix 
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 100)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get Test Set
+dat.val1.x <- train_na_as_cat %>% select(all_of(features.simple))
+dat.val1.x <- model.matrix(income~.,dat.val1.x)
+dat.val1.y <- train_na_as_cat$income
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+```
+
+Testing Rick's features.simple on both data sets
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+#simp2=train_na_rm %>% select(all_of(features.simple))
+
+#fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+DF <- within(simp1, race <- relevel(race, ref = "White"))
+fit.na_as_cat<-glm(income~.,family="binomial",data=DF)
+
+levels(train_na_as_cat$race)
+
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+#Manually adjusting threshhold
+threshold=.2176
+log.predclass<-ifelse(predprobs>threshold,">50K","<=50K")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,test_na_as_cat$income)
+
+exp(cbind("Odds ratio" = coef(fit.na_as_cat), confint.default(fit.na_as_cat, level = 0.95)))
+
+summary(train_na_as_cat)
+
+# fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+# predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+# log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+# plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+# auc(log.roc)
+
+summary(fit.na_as_cat)
+#car::residualPlots(fit.na_as_cat)
+car::influenceIndexPlot(fit.na_as_cat,id.n=3)
+car::influencePlot(fit.na_as_cat,col="red",id.n=3)
+fit.na_as_cat_no_outliers=update(fit.na_as_cat,subset=c(-20872))
+car::compareCoefs(fit.na_as_cat_no_outliers,fit.na_as_cat,se = FALSE)
+
+features.numerical = c("income","age","education_num","capital_gain","capital_loss","hours_per_week")
+
+vif=car::vif(fit.na_as_cat)
+vif[,3]^2
+
+
+```
+
+
+Looking into cross validation
+
+```{r}
+# # define training control
+# train_control <- trainControl(method = "cv", number = 10)
+# 
+# # train the model on training set
+# model <- train(income ~ .,
+#                data = DF,
+#                trControl = train_control,
+#                method = "glm",
+#                family=binomial())
+
+
+```
+
+Testing more complex set
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.complex = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","hours_per_week2","age2","age3","education_num2")
+
+simp1=train_na_as_cat %>% select(all_of(features.complex))
+
+DF <- within(simp1, race <- relevel(race, ref = "White"))
+fit.na_as_cat<-glm(income~.,family="binomial",data=DF)
+
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+#Manually adjusting threshhold
+threshold=.2176
+log.predclass<-ifelse(predprobs>threshold,">50K","<=50K")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,test_na_as_cat$income)
+
+exp(cbind("Odds ratio" = coef(fit.na_as_cat), confint.default(fit.na_as_cat, level = 0.95)))
+
+summary(fit.na_as_cat)
+
+
+```
+
+Adding Native Country
+
+```{r}
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","alt_native_country")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+```
+
+Adding alt_Native_Country
+```{r}
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","alt_native_country")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+summary(fit.na_rm)
+
+#fit.na_rm resulted in the same AUC of .8976 and the same AIC of 16239 so we will not add alt_native_country
+```
+
+Adding alt_marital_status
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","alt_marital_status","collar")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+
+#Same AUC and worse AIC so will not use
+```
+
+Adding alt_occupation
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","alt_occupation")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+
+#Better AUC and AIC so keeping alt occupation
+```
+
+Adding captial bins
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","race","sex","cap_gains_bin","cap_loss_bin","hours_per_week","marriage_status","alt_occupation")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+
+#Worse AUC and AIC so not keeping capital gain and loss bins only
+```
+
+Adding capital bins and capital results
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","cap_gains_bin","cap_loss_bin","hours_per_week","marriage_status","alt_occupation")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+
+#Better AUC and AIC so keeping bins and totals in the model
+```
+
+Trying alt race
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","alt_race","sex","capital_gain","capital_loss","cap_gains_bin","cap_loss_bin","hours_per_week","marriage_status","alt_occupation")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+
+#No change in AUC or AIC so not keeping alt_race
+```
+
+
+Trying alt race
+
+```{r}
+variable.names(train_na_as_cat)
+
+features.simple = c("income","age","education_num","race","sex","capital_gain","capital_loss","cap_gains_bin","cap_loss_bin","hours_per_week","marriage_status","alt_occupation","alt_workclass")
+
+simp1=train_na_as_cat %>% select(all_of(features.simple))
+simp2=train_na_rm %>% select(all_of(features.simple))
+
+fit.na_as_cat<-glm(income~.,family="binomial",data=simp1)
+predprobs<-predict(fit.na_as_cat,test_na_as_cat,type="response")
+log.roc<-roc(response=test_na_as_cat$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_as_cat)
+
+fit.na_rm<-glm(income~.,family="binomial",data=simp2)
+predprobs<-predict(fit.na_rm,test_na_rm,type="response")
+log.roc<-roc(response=test_na_rm$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+auc(log.roc)
+
+summary(fit.na_rm)
+#Improved AUC and AIC so keeping alt_workclass
+```

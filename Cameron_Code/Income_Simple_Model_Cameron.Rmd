@@ -604,3 +604,18 @@ Plotting logistic curve for simple models
 #     )
 ```
 
+
+Bring in Rick data:
+```{r}
+train_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/train_na_rm.csv", header = TRUE)
+
+test_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/test_na_rm.csv", header = TRUE)
+
+train_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/train_na_as_cat.csv", header = TRUE)
+
+test_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/test_na_as_cat.csv", header = TRUE)
+```
+
+features.simple = c("age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar")
+
+features.complex = c("age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","age2","age3","education_num2","hours_per_week2")
