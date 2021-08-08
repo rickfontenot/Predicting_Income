@@ -362,7 +362,9 @@ pre code {
   smotefamily,
   ROSE,
   h2o,
-  pROC
+  pROC,
+  tree,
+  ROCR
 )</code></pre>
 <pre class="r"><code>adult = read.csv(&quot;https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/adult.data&quot;, header = FALSE, stringsAsFactors = T, col.names = c(&quot;age&quot;,&quot;workclass&quot;,&quot;fnlwgt&quot;,&quot;education&quot;,&quot;education_num&quot;,&quot;marital_status&quot;,&quot;occupation&quot;,&quot;relationship&quot;,&quot;race&quot;,&quot;sex&quot;,&quot;capital_gain&quot;,&quot;capital_loss&quot;,&quot;hours_per_week&quot;,&quot;native_country&quot;,&quot;income&quot;))</code></pre>
 <hr />
@@ -773,319 +775,253 @@ adult[,factors_list] &lt;- lapply(adult[,factors_list], as.character)
 adult[is.na(adult)] = &quot;null&quot;
 
 adult[,factors_list] &lt;- lapply(adult[,factors_list], as.factor)
-adult$income &lt;- as.factor(adult$income)</code></pre>
+adult$income &lt;- as.factor(adult$income)
+
+adult &lt;- adult[,!(names(adult) %in% c(&#39;education&#39;, &#39;fnlwgt&#39;))]</code></pre>
 <p>First, look at only quantitative variables</p>
-<pre class="r"><code>set.seed(123)
-smp_size &lt;- floor(0.8 * nrow(adult))
-train_ind &lt;- sample(seq_len(nrow(adult)), size = smp_size)
-train &lt;- adult[train_ind, c(&quot;age&quot;, &quot;fnlwgt&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;, &quot;income&quot;)]
-test &lt;- adult[-train_ind, c(&quot;age&quot;, &quot;fnlwgt&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;, &quot;income&quot;)]</code></pre>
-<p>Normal RF with ROC metric</p>
+<pre class="r"><code>set.seed(1234)
+train_ind = sample(dim(adult)[1],round(dim(adult)[1]*.8))
+train &lt;- adult[train_ind, c(&quot;age&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;, &quot;income&quot;)]
+test &lt;- adult[-train_ind, c(&quot;age&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;, &quot;income&quot;)]</code></pre>
 <pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
                      number = 3,
                      classProbs = T,
-                     summaryFunction = twoClassSummary)
-
-rf_1 &lt;- train(income~., 
+                     summaryFunction = twoClassSummary)</code></pre>
+<p>Normal RF with ROC metric</p>
+<pre class="r"><code>rf_1 &lt;- train(income~., 
                       data=train, 
                       method=&#39;rf&#39;, 
                       metric=&#39;ROC&#39;,
                       trControl = ctrl)
 
-prediction &lt;- predict(rf_1, newdata = test)
+probability &lt;- predict(rf_1, newdata = test, type = &quot;prob&quot;)
+
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc</code></pre>
+<pre><code>## Setting direction: controls &lt; cases</code></pre>
+<pre><code>## Area under the curve: 0.8316</code></pre>
+<pre class="r"><code>split_holder &lt;- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob &lt;- ifelse(ceiling(min(probability$above_fifty) * 1000) &gt; 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob &lt;- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal &lt;- i / 1000
+  counter = counter + 1
+  
+  prediction &lt;- if_else(probability$above_fifty &gt; decimal, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
+  x &lt;- confusionMatrix(table(prediction, test$income))
+
+  split_holder[counter,1] &lt;- decimal
+  split_holder[counter,2] &lt;- x$overall[1]
+  split_holder[counter,3] &lt;- x$byClass[1]
+  split_holder[counter,4] &lt;- x$byClass[2]
+  split_holder[counter,5] &lt;- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split &lt;-(split_holder %&gt;% filter(difference == min(difference)))$decimal
+
+prediction &lt;- if_else(probability$above_fifty &gt; best_split, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
 confusionMatrix(table(prediction, test$income))</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
 ##              
 ## prediction    above_fifty below_fifty
-##   above_fifty         865         265
-##   below_fifty         753        4630
+##   above_fifty        1208        1187
+##   below_fifty         383        3734
 ##                                           
-##                Accuracy : 0.8437          
-##                  95% CI : (0.8346, 0.8524)
-##     No Information Rate : 0.7516          
-##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                Accuracy : 0.7589          
+##                  95% CI : (0.7483, 0.7693)
+##     No Information Rate : 0.7557          
+##     P-Value [Acc &gt; NIR] : 0.2777          
 ##                                           
-##                   Kappa : 0.5344          
+##                   Kappa : 0.4424          
 ##                                           
-##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
+##  Mcnemar&#39;s Test P-Value : &lt;2e-16          
 ##                                           
-##             Sensitivity : 0.5346          
-##             Specificity : 0.9459          
-##          Pos Pred Value : 0.7655          
-##          Neg Pred Value : 0.8601          
-##              Prevalence : 0.2484          
-##          Detection Rate : 0.1328          
-##    Detection Prevalence : 0.1735          
-##       Balanced Accuracy : 0.7402          
+##             Sensitivity : 0.7593          
+##             Specificity : 0.7588          
+##          Pos Pred Value : 0.5044          
+##          Neg Pred Value : 0.9070          
+##              Prevalence : 0.2443          
+##          Detection Rate : 0.1855          
+##    Detection Prevalence : 0.3678          
+##       Balanced Accuracy : 0.7590          
 ##                                           
 ##        &#39;Positive&#39; Class : above_fifty     
 ## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_1, test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))</code></pre>
-<pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.8538</code></pre>
-<p>Normal RF with Accuracy metric</p>
-<pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
-                     number = 3,
-                     classProbs = T)
-
-rf_2 &lt;- train(income~., 
-                      data=train, 
-                      method=&#39;rf&#39;, 
-                      metric=&#39;Accuracy&#39;,
-                      trControl = ctrl)
-
-prediction &lt;- predict(rf_2, newdata = test)
-confusionMatrix(table(prediction, test$income))</code></pre>
-<pre><code>## Confusion Matrix and Statistics
-## 
-##              
-## prediction    above_fifty below_fifty
-##   above_fifty         869         267
-##   below_fifty         749        4628
-##                                          
-##                Accuracy : 0.844          
-##                  95% CI : (0.835, 0.8527)
-##     No Information Rate : 0.7516         
-##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16      
-##                                          
-##                   Kappa : 0.536          
-##                                          
-##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16      
-##                                          
-##             Sensitivity : 0.5371         
-##             Specificity : 0.9455         
-##          Pos Pred Value : 0.7650         
-##          Neg Pred Value : 0.8607         
-##              Prevalence : 0.2484         
-##          Detection Rate : 0.1334         
-##    Detection Prevalence : 0.1744         
-##       Balanced Accuracy : 0.7413         
-##                                          
-##        &#39;Positive&#39; Class : above_fifty    
-## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_2, test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))</code></pre>
-<pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.8539</code></pre>
 <pre class="r"><code>#SMOTE only takes quantitative variables
 train$income &lt;- as.factor(train$income)
 table(train$income)</code></pre>
 <pre><code>## 
 ## above_fifty below_fifty 
-##        6223       19825</code></pre>
-<pre class="r"><code>new_train &lt;- SMOTE(X = train[,c(&quot;age&quot;, &quot;fnlwgt&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;)], target = train[,&quot;income&quot;], K = 5, dup_size = 6)$data
+##        6250       19799</code></pre>
+<pre class="r"><code>new_train &lt;- SMOTE(X = train[,c(&quot;age&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;)], target = train[,&quot;income&quot;], K = 5, dup_size = 6)$data
 colnames(new_train)[colnames(new_train) == &#39;class&#39;] &lt;- &#39;income&#39;
 table(new_train$income)</code></pre>
 <pre><code>## 
 ## above_fifty below_fifty 
-##       43561       19825</code></pre>
-<p>SMOTE RF with ROC metric</p>
-<pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
-                     number = 3,
-                     classProbs = T,
-                     summaryFunction = twoClassSummary)
-
-rf_3 &lt;- train(income~., 
+##       43750       19799</code></pre>
+<p>SMOTE RF with default split at .5</p>
+<pre class="r"><code>rf_3 &lt;- train(income~., 
                       data=new_train, 
                       method=&#39;rf&#39;, 
                       metric=&#39;ROC&#39;,
                       trControl = ctrl)
 
-prediction &lt;- predict(rf_3, newdata = test)
+probability &lt;- predict(rf_3, test, type=&quot;prob&quot;)
+roc(predictor=probability$above_fifty,
+               response=test$income,
+               levels=rev(levels(test$income)))$auc</code></pre>
+<pre><code>## Setting direction: controls &lt; cases</code></pre>
+<pre><code>## Area under the curve: 0.8079</code></pre>
+<pre class="r"><code>prediction &lt;- if_else(probability$above_fifty &gt; best_split, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
 confusionMatrix(table(prediction, test$income))</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
 ##              
 ## prediction    above_fifty below_fifty
-##   above_fifty         952         511
-##   below_fifty         666        4384
+##   above_fifty        1440        2200
+##   below_fifty         151        2721
 ##                                           
-##                Accuracy : 0.8193          
-##                  95% CI : (0.8097, 0.8286)
-##     No Information Rate : 0.7516          
-##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                Accuracy : 0.639           
+##                  95% CI : (0.6272, 0.6507)
+##     No Information Rate : 0.7557          
+##     P-Value [Acc &gt; NIR] : 1               
 ##                                           
-##                   Kappa : 0.5             
+##                   Kappa : 0.319           
 ##                                           
-##  Mcnemar&#39;s Test P-Value : 7.162e-06       
+##  Mcnemar&#39;s Test P-Value : &lt;2e-16          
 ##                                           
-##             Sensitivity : 0.5884          
-##             Specificity : 0.8956          
-##          Pos Pred Value : 0.6507          
-##          Neg Pred Value : 0.8681          
-##              Prevalence : 0.2484          
-##          Detection Rate : 0.1462          
-##    Detection Prevalence : 0.2246          
-##       Balanced Accuracy : 0.7420          
+##             Sensitivity : 0.9051          
+##             Specificity : 0.5529          
+##          Pos Pred Value : 0.3956          
+##          Neg Pred Value : 0.9474          
+##              Prevalence : 0.2443          
+##          Detection Rate : 0.2211          
+##    Detection Prevalence : 0.5590          
+##       Balanced Accuracy : 0.7290          
 ##                                           
 ##        &#39;Positive&#39; Class : above_fifty     
 ## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_3, test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))</code></pre>
-<pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.843</code></pre>
-<p>SMOTE RF with Accuracy metric</p>
-<pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
-                     number = 3)
-
-rf_4 &lt;- train(income~., 
+<p>SMOTE RF with optimized split</p>
+<pre class="r"><code>rf_4 &lt;- train(income~., 
                       data=new_train, 
                       method=&#39;rf&#39;, 
-                      metric=&#39;Accuracy&#39;,
+                      metric=&#39;ROC&#39;,
                       trControl = ctrl)
 
-prediction &lt;- predict(rf_4, newdata = test)
+probability &lt;- predict(rf_4, newdata = test, type = &quot;prob&quot;)
+
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc</code></pre>
+<pre><code>## Setting direction: controls &lt; cases</code></pre>
+<pre><code>## Area under the curve: 0.8081</code></pre>
+<pre class="r"><code>split_holder &lt;- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob &lt;- ifelse(ceiling(min(probability$above_fifty) * 1000) &gt; 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob &lt;- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal &lt;- i / 1000
+  counter = counter + 1
+  
+  prediction &lt;- if_else(probability$above_fifty &gt; decimal, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
+  x &lt;- confusionMatrix(table(prediction, test$income))
+
+  split_holder[counter,1] &lt;- decimal
+  split_holder[counter,2] &lt;- x$overall[1]
+  split_holder[counter,3] &lt;- x$byClass[1]
+  split_holder[counter,4] &lt;- x$byClass[2]
+  split_holder[counter,5] &lt;- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split &lt;-(split_holder %&gt;% filter(difference == min(difference)))$decimal
+
+prediction &lt;- if_else(probability$above_fifty &gt; best_split, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
 confusionMatrix(table(prediction, test$income))</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
 ##              
 ## prediction    above_fifty below_fifty
-##   above_fifty         950         519
-##   below_fifty         668        4376
+##   above_fifty        1194        1227
+##   below_fifty         397        3694
 ##                                           
-##                Accuracy : 0.8177          
-##                  95% CI : (0.8082, 0.8271)
-##     No Information Rate : 0.7516          
-##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                Accuracy : 0.7506          
+##                  95% CI : (0.7399, 0.7611)
+##     No Information Rate : 0.7557          
+##     P-Value [Acc &gt; NIR] : 0.8331          
 ##                                           
-##                   Kappa : 0.4964          
+##                   Kappa : 0.4259          
 ##                                           
-##  Mcnemar&#39;s Test P-Value : 1.741e-05       
+##  Mcnemar&#39;s Test P-Value : &lt;2e-16          
 ##                                           
-##             Sensitivity : 0.5871          
-##             Specificity : 0.8940          
-##          Pos Pred Value : 0.6467          
-##          Neg Pred Value : 0.8676          
-##              Prevalence : 0.2484          
-##          Detection Rate : 0.1459          
-##    Detection Prevalence : 0.2255          
-##       Balanced Accuracy : 0.7406          
+##             Sensitivity : 0.7505          
+##             Specificity : 0.7507          
+##          Pos Pred Value : 0.4932          
+##          Neg Pred Value : 0.9030          
+##              Prevalence : 0.2443          
+##          Detection Rate : 0.1834          
+##    Detection Prevalence : 0.3718          
+##       Balanced Accuracy : 0.7506          
 ##                                           
 ##        &#39;Positive&#39; Class : above_fifty     
 ## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_4, test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))</code></pre>
-<pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.8432</code></pre>
-<p>ROSE RF with AUC metric</p>
-<pre class="r"><code>library(ROSE)
-#ROSE only takes quantitative variables
+<p>ROSE RF</p>
+<pre class="r"><code>#ROSE only takes quantitative variables
 table(train$income)</code></pre>
 <pre><code>## 
 ## above_fifty below_fifty 
-##        6223       19825</code></pre>
-<pre class="r"><code>rose_train &lt;- train[,c(&quot;age&quot;, &quot;fnlwgt&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;, &quot;income&quot;)]
+##        6250       19799</code></pre>
+<pre class="r"><code>rose_train &lt;- train[,c(&quot;age&quot;, &quot;education_num&quot;, &quot;sex&quot;, &quot;capital_gain&quot;, &quot;capital_loss&quot;, &quot;hours_per_week&quot;, &quot;income&quot;)]
 rose_train &lt;- ROSE(income ~ ., data = rose_train, N = 25000)$data
 table(rose_train$income)</code></pre>
 <pre><code>## 
 ## below_fifty above_fifty 
-##       12554       12446</code></pre>
-<p>ROSE RF with ROC metric</p>
-<pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
-                     number = 3,
-                     classProbs = T,
-                     summaryFunction = twoClassSummary)
-
-rf_5 &lt;- train(income~., 
+##       12541       12459</code></pre>
+<pre class="r"><code>rf_5 &lt;- train(income~., 
                       data=rose_train, 
                       method=&#39;rf&#39;, 
                       metric=&#39;ROC&#39;,
                       trControl = ctrl)
 
-prediction &lt;- predict(rf_5, newdata = test)
-true_value &lt;- test$income
+probability &lt;- predict(rf_5, newdata = test, type = &quot;prob&quot;)
 
-results &lt;- data.frame(prediction, true_value)
-confusionMatrix(results$prediction, results$true_value)</code></pre>
-<pre><code>## Warning in confusionMatrix.default(results$prediction, results$true_value):
-## Levels are not in the same order for reference and data. Refactoring data to
-## match.</code></pre>
-<pre><code>## Confusion Matrix and Statistics
-## 
-##              Reference
-## Prediction    above_fifty below_fifty
-##   above_fifty         431         166
-##   below_fifty        1187        4729
-##                                           
-##                Accuracy : 0.7923          
-##                  95% CI : (0.7822, 0.8021)
-##     No Information Rate : 0.7516          
-##     P-Value [Acc &gt; NIR] : 5.222e-15       
-##                                           
-##                   Kappa : 0.2947          
-##                                           
-##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
-##                                           
-##             Sensitivity : 0.26638         
-##             Specificity : 0.96609         
-##          Pos Pred Value : 0.72194         
-##          Neg Pred Value : 0.79936         
-##              Prevalence : 0.24843         
-##          Detection Rate : 0.06618         
-##    Detection Prevalence : 0.09166         
-##       Balanced Accuracy : 0.61623         
-##                                           
-##        &#39;Positive&#39; Class : above_fifty     
-## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_5, test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=test$income,
-               levels=rev(levels(test$income)))</code></pre>
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc</code></pre>
 <pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.822</code></pre>
+<pre><code>## Area under the curve: 0.8255</code></pre>
 <pre class="r"><code>head(rose_train)</code></pre>
-<pre><code>##        age    fnlwgt education_num        sex capital_gain capital_loss
-## 1 34.85658 194554.30      9.601107 0.76533627    -218.4558    98.885631
-## 2 65.13744 323048.01     15.791982 0.04798625    -195.2435   181.241145
-## 3 57.68714  90357.03     14.059538 0.24673481    -416.2079   190.849114
-## 4 24.57163  96651.86     12.486956 1.13663426     342.0252   -26.654872
-## 5 45.97042 136549.89     10.889435 0.39969266     387.6536     3.685582
-## 6 36.89666  71318.15     11.368781 0.91481710    -143.1796    63.969948
-##   hours_per_week      income
-## 1       55.44972 below_fifty
-## 2       28.34319 below_fifty
-## 3       61.77265 below_fifty
-## 4       38.79300 below_fifty
-## 5       41.34393 below_fifty
-## 6       43.63440 below_fifty</code></pre>
+<pre><code>##        age education_num        sex capital_gain capital_loss hours_per_week
+## 1 49.56352      9.618410  0.6455570     102.7381    -49.37672       39.24361
+## 2 49.28787     13.961625 -0.0751512    -341.3758     13.32168       38.89996
+## 3 31.74453      9.895742  0.9126300     235.3683     27.56844       52.21348
+## 4 44.50354     10.761077 -0.2657659    -158.7992    123.36027       49.78123
+## 5 28.92262     10.417942  0.2839621    -113.6351    146.61325       45.35528
+## 6 24.98261      9.235780  1.0167858    -697.2221    -27.86129       33.26874
+##        income
+## 1 below_fifty
+## 2 below_fifty
+## 3 below_fifty
+## 4 below_fifty
+## 5 below_fifty
+## 6 below_fifty</code></pre>
 <p>Target Encoding for Categorical Variables</p>
 <pre class="r"><code>train_h20 &lt;- adult[train_ind,]
-test_h2o &lt;- adult[-train_ind,]
-train_h20 &lt;- train_h20[,!(names(train_h20) %in% c(&#39;education&#39;))]
-test_h2o &lt;- test_h2o[,!(names(test_h2o) %in% c(&#39;education&#39;))]</code></pre>
+test_h2o &lt;- adult[-train_ind,]</code></pre>
 <pre class="r"><code>h2o.init(nthreads = -1)</code></pre>
 <pre><code>## 
 ## H2O is not running yet, starting it now...
 ## 
 ## Note:  In case of errors look at the following log files:
-##     C:\Users\mmaze\AppData\Local\Temp\Rtmpio19PZ\file3cc84c641648/h2o_mmaze_started_from_r.out
-##     C:\Users\mmaze\AppData\Local\Temp\Rtmpio19PZ\file3cc8bac4cba/h2o_mmaze_started_from_r.err
+##     C:\Users\mmaze\AppData\Local\Temp\RtmpoxByv7\file457c28724aa0/h2o_mmaze_started_from_r.out
+##     C:\Users\mmaze\AppData\Local\Temp\RtmpoxByv7\file457c4e145ed/h2o_mmaze_started_from_r.err
 ## 
 ## 
-## Starting H2O JVM and connecting:  Connection successful!
+## Starting H2O JVM and connecting: . Connection successful!
 ## 
 ## R is connected to the H2O cluster: 
-##     H2O cluster uptime:         5 seconds 846 milliseconds 
+##     H2O cluster uptime:         7 seconds 404 milliseconds 
 ##     H2O cluster timezone:       America/New_York 
 ##     H2O data parsing timezone:  UTC 
 ##     H2O cluster version:        3.32.1.3 
-##     H2O cluster version age:    2 months and 8 days  
-##     H2O cluster name:           H2O_started_from_R_mmaze_ceb218 
+##     H2O cluster version age:    2 months and 19 days  
+##     H2O cluster name:           H2O_started_from_R_mmaze_gzg265 
 ##     H2O cluster total nodes:    1 
 ##     H2O cluster total memory:   1.96 GB 
 ##     H2O cluster total cores:    8 
@@ -1145,7 +1081,7 @@ transformed_test &lt;- as.data.frame(transformed_test)
 transformed_train = transformed_train[,!(names(transformed_train) %in% c(encoded_columns, &quot;fold&quot;))]
 
 transformed_test = transformed_test[,!(names(transformed_test) %in% c(encoded_columns, &quot;fold&quot;))]</code></pre>
-<p>Target Encoding RF with ROC metric</p>
+<p>Target Encoding RF</p>
 <pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
                      number = 5,
                      classProbs = T,
@@ -1157,59 +1093,78 @@ rf_6 &lt;- train(income~.,
                       metric=&#39;ROC&#39;,
                       trControl = ctrl)
 
-prediction &lt;- predict(rf_6, newdata = transformed_test)
-prediction_df &lt;- data.frame(prediction, transformed_test$income)
+probability &lt;- predict(rf_6, newdata = transformed_test, type = &quot;prob&quot;)
+
+roc(predictor=probability$above_fifty,
+    response=transformed_test$income,
+    levels=rev(levels(transformed_test$income)))$auc</code></pre>
+<pre><code>## Setting direction: controls &lt; cases</code></pre>
+<pre><code>## Area under the curve: 0.9174</code></pre>
+<pre class="r"><code>split_holder &lt;- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob &lt;- ifelse(ceiling(min(probability$above_fifty) * 1000) &gt; 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob &lt;- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal &lt;- i / 1000
+  counter = counter + 1
+  
+  prediction &lt;- if_else(probability$above_fifty &gt; decimal, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
+  x &lt;- confusionMatrix(table(prediction, transformed_test$income))
+
+  split_holder[counter,1] &lt;- decimal
+  split_holder[counter,2] &lt;- x$overall[1]
+  split_holder[counter,3] &lt;- x$byClass[1]
+  split_holder[counter,4] &lt;- x$byClass[2]
+  split_holder[counter,5] &lt;- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split &lt;-(split_holder %&gt;% filter(difference == min(difference)))$decimal
+
+prediction &lt;- if_else(probability$above_fifty &gt; best_split, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
 confusionMatrix(table(prediction, transformed_test$income))</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
 ##              
 ## prediction    above_fifty below_fifty
-##   above_fifty        1044         311
-##   below_fifty         574        4584
+##   above_fifty        1321         828
+##   below_fifty         270        4093
 ##                                           
-##                Accuracy : 0.8641          
-##                  95% CI : (0.8556, 0.8724)
-##     No Information Rate : 0.7516          
+##                Accuracy : 0.8314          
+##                  95% CI : (0.8221, 0.8404)
+##     No Information Rate : 0.7557          
 ##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
 ##                                           
-##                   Kappa : 0.6152          
+##                   Kappa : 0.5918          
 ##                                           
 ##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
 ##                                           
-##             Sensitivity : 0.6452          
-##             Specificity : 0.9365          
-##          Pos Pred Value : 0.7705          
-##          Neg Pred Value : 0.8887          
-##              Prevalence : 0.2484          
-##          Detection Rate : 0.1603          
-##    Detection Prevalence : 0.2080          
-##       Balanced Accuracy : 0.7909          
+##             Sensitivity : 0.8303          
+##             Specificity : 0.8317          
+##          Pos Pred Value : 0.6147          
+##          Neg Pred Value : 0.9381          
+##              Prevalence : 0.2443          
+##          Detection Rate : 0.2029          
+##    Detection Prevalence : 0.3300          
+##       Balanced Accuracy : 0.8310          
 ##                                           
 ##        &#39;Positive&#39; Class : above_fifty     
 ## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_6, transformed_test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=transformed_test$income,
-               levels=rev(levels(transformed_test$income)))</code></pre>
-<pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.919</code></pre>
 <pre class="r"><code>print(rf_6)</code></pre>
 <pre><code>## Random Forest 
 ## 
-## 26048 samples
-##    13 predictor
+## 26049 samples
+##    12 predictor
 ##     2 classes: &#39;above_fifty&#39;, &#39;below_fifty&#39; 
 ## 
 ## No pre-processing
 ## Resampling: Cross-Validated (5 fold) 
-## Summary of sample sizes: 20839, 20839, 20838, 20838, 20838 
+## Summary of sample sizes: 20839, 20839, 20839, 20839, 20840 
 ## Resampling results across tuning parameters:
 ## 
-##   mtry  ROC        Sens       Spec     
-##    2    0.9117619  0.6204420  0.9391677
-##    7    0.9081276  0.6189935  0.9332156
-##   13    0.9054576  0.6222065  0.9289786
+##   mtry  ROC        Sens     Spec     
+##    2    0.9112998  0.63152  0.9385828
+##    7    0.9057373  0.63360  0.9249962
+##   12    0.9028469  0.63184  0.9217638
 ## 
 ## ROC was used to select the optimal model using the largest value.
 ## The final value used for the model was mtry = 2.</code></pre>
@@ -1217,94 +1172,249 @@ rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
 <pre><code>## rf variable importance
 ## 
 ##                   Overall
-## capital_gain       100.00
-## relationship_te     96.61
-## age                 95.16
-## marital_status_te   94.65
-## occupation_te       92.55
-## education_num       88.83
-## fnlwgt              74.24
-## hours_per_week      51.49
-## workclass_te        28.59
-## capital_loss        18.26
-## native_country_te   11.91
-## race_te              9.53
+## relationship_te    100.00
+## capital_gain        95.06
+## age                 92.23
+## education_num       85.22
+## marital_status_te   83.85
+## occupation_te       82.69
+## hours_per_week      49.17
+## workclass_te        28.16
+## capital_loss        19.40
+## native_country_te   12.46
+## race_te              9.68
 ## sex                  0.00</code></pre>
-<p>Target Encoding Ranger with ROC metric</p>
+<pre class="r"><code>pred &lt;- prediction(probability[,2], transformed_test$income)
+roc.perf = performance(pred, measure = &quot;tpr&quot;, x.measure = &quot;fpr&quot;)
+auc.train &lt;- performance(pred, measure = &quot;auc&quot;)
+auc.train &lt;- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste(&quot;AUC = &quot;, round(auc.train[[1]],3), sep = &quot;&quot;))</code></pre>
+<p><img src="data:image/png;base64,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" width="672" /></p>
+<p>Target Encoding Ranger</p>
 <pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
                      number = 5,
+                     repeats = 3,
                      classProbs = T,
-                     summaryFunction = twoClassSummary)
-
-rf_7 &lt;- train(income~., 
+                     summaryFunction = twoClassSummary)</code></pre>
+<pre><code>## Warning: `repeats` has no meaning for this resampling method.</code></pre>
+<pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
+                     repeats = 3,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)</code></pre>
+<pre><code>## Warning: `repeats` has no meaning for this resampling method.</code></pre>
+<pre class="r"><code>rf_7 &lt;- train(income~., 
                       data=transformed_train, 
                       method=&#39;ranger&#39;, 
                       metric=&#39;ROC&#39;,
                       trControl = ctrl)
 
-prediction &lt;- predict(rf_7, newdata = transformed_test)
-prediction_df &lt;- data.frame(prediction, transformed_test$income)
+probability &lt;- predict(rf_7, newdata = transformed_test, type = &quot;prob&quot;)
+
+roc(predictor=probability$above_fifty,
+    response=transformed_test$income,
+    levels=rev(levels(transformed_test$income)))$auc</code></pre>
+<pre><code>## Setting direction: controls &lt; cases</code></pre>
+<pre><code>## Area under the curve: 0.9198</code></pre>
+<pre class="r"><code>split_holder &lt;- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob &lt;- ifelse(ceiling(min(probability$above_fifty) * 100000) &gt; 0, ceiling(min(probability$above_fifty) * 100000), 1)
+max_prob &lt;- ifelse(floor(max(probability$above_fifty) * 100000) == 100000, 99999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal &lt;- i / 100000
+  counter = counter + 1
+  
+  prediction &lt;- if_else(probability$above_fifty &gt; decimal, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
+  x &lt;- confusionMatrix(table(prediction, transformed_test$income))
+
+  split_holder[counter,1] &lt;- decimal
+  split_holder[counter,2] &lt;- x$overall[1]
+  split_holder[counter,3] &lt;- x$byClass[1]
+  split_holder[counter,4] &lt;- x$byClass[2]
+  split_holder[counter,5] &lt;- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split &lt;-(split_holder %&gt;% filter(difference == min(difference)))$decimal
+
+prediction &lt;- if_else(probability$above_fifty &gt; best_split, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
 confusionMatrix(table(prediction, transformed_test$income))</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
 ##              
 ## prediction    above_fifty below_fifty
-##   above_fifty        1023         303
-##   below_fifty         595        4592
+##   above_fifty        1591        4781
+##   below_fifty           0         140
 ##                                           
-##                Accuracy : 0.8621          
-##                  95% CI : (0.8535, 0.8704)
-##     No Information Rate : 0.7516          
-##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                Accuracy : 0.2658          
+##                  95% CI : (0.2551, 0.2767)
+##     No Information Rate : 0.7557          
+##     P-Value [Acc &gt; NIR] : 1               
 ##                                           
-##                   Kappa : 0.607           
+##                   Kappa : 0.0141          
 ##                                           
-##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
+##  Mcnemar&#39;s Test P-Value : &lt;2e-16          
 ##                                           
-##             Sensitivity : 0.6323          
-##             Specificity : 0.9381          
-##          Pos Pred Value : 0.7715          
-##          Neg Pred Value : 0.8853          
-##              Prevalence : 0.2484          
-##          Detection Rate : 0.1571          
-##    Detection Prevalence : 0.2036          
-##       Balanced Accuracy : 0.7852          
+##             Sensitivity : 1.00000         
+##             Specificity : 0.02845         
+##          Pos Pred Value : 0.24969         
+##          Neg Pred Value : 1.00000         
+##              Prevalence : 0.24432         
+##          Detection Rate : 0.24432         
+##    Detection Prevalence : 0.97850         
+##       Balanced Accuracy : 0.51422         
 ##                                           
 ##        &#39;Positive&#39; Class : above_fifty     
 ## </code></pre>
-<pre class="r"><code>rf.probs &lt;- predict(rf_7, transformed_test, type=&quot;prob&quot;)
-rf.ROC &lt;- roc(predictor=rf.probs$above_fifty,
-               response=transformed_test$income,
-               levels=rev(levels(transformed_test$income)))</code></pre>
-<pre><code>## Setting direction: controls &lt; cases</code></pre>
-<pre class="r"><code>rf.ROC$auc</code></pre>
-<pre><code>## Area under the curve: 0.9214</code></pre>
 <p>This returned the best AUC</p>
 <pre class="r"><code>print(rf_7)</code></pre>
 <pre><code>## Random Forest 
 ## 
-## 26048 samples
-##    13 predictor
+## 26049 samples
+##    12 predictor
 ##     2 classes: &#39;above_fifty&#39;, &#39;below_fifty&#39; 
 ## 
 ## No pre-processing
-## Resampling: Cross-Validated (5 fold) 
-## Summary of sample sizes: 20838, 20839, 20838, 20838, 20839 
+## Resampling: Cross-Validated (10 fold) 
+## Summary of sample sizes: 23444, 23444, 23444, 23444, 23444, 23444, ... 
 ## Resampling results across tuning parameters:
 ## 
-##   mtry  splitrule   ROC        Sens       Spec     
-##    2    gini        0.9152856  0.6161027  0.9443127
-##    2    extratrees  0.9097210  0.5873374  0.9414880
-##    7    gini        0.9097790  0.6263877  0.9345776
-##    7    extratrees  0.9071624  0.6207614  0.9310971
-##   13    gini        0.9077668  0.6286378  0.9312989
-##   13    extratrees  0.9063503  0.6281543  0.9290290
+##   mtry  splitrule   ROC        Sens     Spec     
+##    2    gini        0.9175712  0.62464  0.9399467
+##    2    extratrees  0.9122517  0.59984  0.9401992
+##    7    gini        0.9068109  0.63360  0.9257039
+##    7    extratrees  0.9064260  0.63584  0.9250977
+##   12    gini        0.9037073  0.63584  0.9225725
+##   12    extratrees  0.9035278  0.64016  0.9230774
 ## 
 ## Tuning parameter &#39;min.node.size&#39; was held constant at a value of 1
 ## ROC was used to select the optimal model using the largest value.
 ## The final values used for the model were mtry = 2, splitrule = gini
 ##  and min.node.size = 1.</code></pre>
+<pre class="r"><code>pred &lt;- prediction(probability[,2], test$income)
+roc.perf = performance(pred, measure = &quot;tpr&quot;, x.measure = &quot;fpr&quot;)
+auc.train &lt;- performance(pred, measure = &quot;auc&quot;)
+auc.train &lt;- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste(&quot;AUC = &quot;, round(auc.train[[1]],3), sep = &quot;&quot;))</code></pre>
+<p><img src="data:image/png;base64,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" width="672" /></p>
 <pre class="r"><code>h2o.shutdown(prompt = F)</code></pre>
+<pre class="r"><code>train_full &lt;- adult[train_ind,]
+test_full &lt;- adult[-train_ind,]</code></pre>
+<p>One Hot Encoded RF</p>
+<pre class="r"><code>ctrl &lt;- trainControl(method = &quot;cv&quot;,
+                     number = 5,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+rf_8 &lt;- train(income~., 
+                      data=train_full, 
+                      method=&#39;rf&#39;, 
+                      metric=&#39;ROC&#39;,
+                      trControl = ctrl)
+
+probability &lt;- predict(rf_8, newdata = test_full, type = &quot;prob&quot;)
+
+roc(predictor=probability$above_fifty,
+    response=test_full$income,
+    levels=rev(levels(test_full$income)))$auc</code></pre>
+<pre><code>## Setting direction: controls &lt; cases</code></pre>
+<pre><code>## Area under the curve: 0.8992</code></pre>
+<pre class="r"><code>split_holder &lt;- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob &lt;- ifelse(ceiling(min(probability$above_fifty) * 1000) &gt; 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob &lt;- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal &lt;- i / 1000
+  counter = counter + 1
+  
+  prediction &lt;- if_else(probability$above_fifty &gt; decimal, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
+  x &lt;- confusionMatrix(table(prediction, test_full$income))
+
+  split_holder[counter,1] &lt;- decimal
+  split_holder[counter,2] &lt;- x$overall[1]
+  split_holder[counter,3] &lt;- x$byClass[1]
+  split_holder[counter,4] &lt;- x$byClass[2]
+  split_holder[counter,5] &lt;- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split &lt;-(split_holder %&gt;% filter(difference == min(difference)))$decimal
+
+prediction &lt;- if_else(probability$above_fifty &gt; best_split, &quot;above_fifty&quot;, &quot;below_fifty&quot;)
+confusionMatrix(table(prediction, test_full$income))</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##              
+## prediction    above_fifty below_fifty
+##   above_fifty        1294         926
+##   below_fifty         297        3995
+##                                           
+##                Accuracy : 0.8122          
+##                  95% CI : (0.8025, 0.8216)
+##     No Information Rate : 0.7557          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.5514          
+##                                           
+##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
+##                                           
+##             Sensitivity : 0.8133          
+##             Specificity : 0.8118          
+##          Pos Pred Value : 0.5829          
+##          Neg Pred Value : 0.9308          
+##              Prevalence : 0.2443          
+##          Detection Rate : 0.1987          
+##    Detection Prevalence : 0.3409          
+##       Balanced Accuracy : 0.8126          
+##                                           
+##        &#39;Positive&#39; Class : above_fifty     
+## </code></pre>
+<pre class="r"><code>print(rf_8)</code></pre>
+<pre><code>## Random Forest 
+## 
+## 26049 samples
+##    12 predictor
+##     2 classes: &#39;above_fifty&#39;, &#39;below_fifty&#39; 
+## 
+## No pre-processing
+## Resampling: Cross-Validated (5 fold) 
+## Summary of sample sizes: 20839, 20839, 20839, 20840, 20839 
+## Resampling results across tuning parameters:
+## 
+##   mtry  ROC        Sens    Spec     
+##    2    0.8855613  0.1648  0.9965656
+##   43    0.9020995  0.6424  0.9178748
+##   84    0.8948755  0.6384  0.9093894
+## 
+## ROC was used to select the optimal model using the largest value.
+## The final value used for the model was mtry = 43.</code></pre>
+<pre class="r"><code>varImp(rf_8)</code></pre>
+<pre><code>## rf variable importance
+## 
+##   only 20 most important variables shown (out of 84)
+## 
+##                                   Overall
+## marital_status Married-civ-spouse 100.000
+## age                                96.257
+## education_num                      81.061
+## capital_gain                       78.581
+## hours_per_week                     54.514
+## capital_loss                       24.117
+## marital_status Never-married       14.192
+## occupation Exec-managerial          9.513
+## workclass Private                   9.373
+## occupation Prof-specialty           7.991
+## sex                                 7.146
+## workclass Self-emp-not-inc          6.601
+## occupation Sales                    6.570
+## occupation Craft-repair             6.352
+## race White                          5.152
+## workclass Local-gov                 4.886
+## relationship Wife                   4.609
+## workclass Self-emp-inc              4.401
+## native_country United-States        4.398
+## occupation Transport-moving         4.222</code></pre>
 </div>
 
 
