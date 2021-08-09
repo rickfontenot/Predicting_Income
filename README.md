@@ -10,5 +10,5 @@ View a written summary of our project here:
 * [MSDS6372_Project2.pdf](https://github.com/rickfontenot/Predicting_Income/blob/main/MSDS6372_Project2.pdf) 
 
 #Code with Analysis
-* [View a written summary of our project here](https://htmlpreview.github.io/?https://github.com/rickfontenot/Predicting_Income/blob/main/EDA_and_modeling.html) 
+* [View code and plots here](https://htmlpreview.github.io/?https://github.com/rickfontenot/Predicting_Income/blob/main/EDA_and_modeling.html) 
 
