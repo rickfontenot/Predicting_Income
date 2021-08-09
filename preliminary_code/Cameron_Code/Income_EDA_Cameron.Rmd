@@ -44,7 +44,7 @@ Load Data downloaded from UCI and stored on github repo
 https://archive.ics.uci.edu/ml/datasets/Adult
 
 ```{r}
-adult = read.csv("/Users/Camo/Documents/SMU_DS/Applied Stats/Project2/Predicting_Income/adult.data", header = FALSE)
+adult = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/data/adult.data", header = FALSE)
 ```
 
 Description of variables from UCI:

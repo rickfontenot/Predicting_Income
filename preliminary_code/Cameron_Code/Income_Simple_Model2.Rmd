@@ -34,13 +34,13 @@ library(pROC)
 
 Bring in train/test data:
 ```{r}
-train_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/train_na_rm.csv", header = TRUE,stringsAsFactors = TRUE)
+train_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/data/Test_Train_Set/NAs_Removed/train_na_rm.csv", header = TRUE,stringsAsFactors = TRUE)
 
-test_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/test_na_rm.csv", header = TRUE,stringsAsFactors = TRUE)
+test_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/data/Test_Train_Set/NAs_Removed/test_na_rm.csv", header = TRUE,stringsAsFactors = TRUE)
 
-train_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/train_na_as_cat.csv", header = TRUE,stringsAsFactors = TRUE)
+train_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/data/Test_Train_Set/NAs_as_a_category/train_na_as_cat.csv", header = TRUE,stringsAsFactors = TRUE)
 
-test_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/test_na_as_cat.csv", header = TRUE,stringsAsFactors = TRUE)
+test_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/data/Test_Train_Set/NAs_as_a_category/test_na_as_cat.csv", header = TRUE,stringsAsFactors = TRUE)
 ```
 
 Add features from EDA to the train/test sets
