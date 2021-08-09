@@ -21,7 +21,7 @@ pacman::p_load(
 ```
 
 ```{r load data}
-adult = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/adult.data", header = FALSE, stringsAsFactors = T, col.names = c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income"))
+adult = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/data/adult.data", header = FALSE, stringsAsFactors = T, col.names = c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income"))
 ```
 
 _______________________________________________________________________________
