@@ -1,0 +1,32 @@
+{
+    "id": "C7CC6B57",
+    "path": null,
+    "project_path": null,
+    "type": "r_dataframe",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1628288137981.0,
+    "source_on_save": false,
+    "relative_order": 5,
+    "properties": {
+        "expression": "training",
+        "caption": "training",
+        "totalObservations": 92,
+        "displayedObservations": 92,
+        "variables": 14,
+        "cacheKey": "41419739",
+        "object": "training",
+        "environment": "",
+        "contentUrl": "grid_resource/gridviewer.html?env=&obj=training&cache_key=41419739&max_cols=50",
+        "preview": 0
+    },
+    "folds": "",
+    "lastKnownWriteTime": 140692598993736,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1628288137981,
+    "read_only": false,
+    "read_only_alternatives": []
+}

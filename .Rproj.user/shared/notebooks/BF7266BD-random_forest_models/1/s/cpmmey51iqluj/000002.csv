@@ -1,0 +1,4 @@
+"0","pc.result <- prcomp(adult[,c(1,3,5,11,12,13)], scale.=T)"
+"0","par(mfrow=c(1,2))"
+"0","eigenvals<-(pc.result$sdev)^2"
+"0","plot(1:6,eigenvals/sum(eigenvals),type=""l"",main=""Scree Plot"",ylab=""Prop. Var. Explained"")"

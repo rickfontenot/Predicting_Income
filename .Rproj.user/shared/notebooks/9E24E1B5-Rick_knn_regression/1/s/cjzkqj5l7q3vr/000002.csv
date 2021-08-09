@@ -1,0 +1,43 @@
+"0","library(ggthemes)"
+"0","theme_set(theme_fivethirtyeight())"
+"0","theme_update(axis.title = element_text()) #the default for fivethirtyeight is to not show axis labels, this removes that default so we can choose to specify and display axis titles"
+"0","theme_update(plot.title = element_text(hjust = 0.5))"
+"0",""
+"0","library(ggplot2)"
+"0","library(dplyr)"
+"0","library(caret)"
+"0","library(plyr)"
+"2","---------------------------------------------------------------------------------------------------------------------
+"
+"2","You have loaded plyr after dplyr - this is likely to cause problems.
+If you need functions from both plyr and dplyr, please load plyr first, then dplyr:
+library(plyr); library(dplyr)
+"
+"2","---------------------------------------------------------------------------------------------------------------------
+"
+"2","
+Attaching package: ‘plyr’
+
+"
+"2","The following objects are masked from ‘package:Hmisc’:
+
+    is.discrete, summarize
+
+"
+"2","The following object is masked from ‘package:gtsummary’:
+
+    mutate
+
+"
+"2","The following object is masked from ‘package:purrr’:
+
+    compact
+
+"
+"2","The following objects are masked from ‘package:dplyr’:
+
+    arrange, count, desc, failwith, id, mutate, rename, summarise, summarize
+
+"
+"0","library(lattice)"
+"0","library(tidyverse)"

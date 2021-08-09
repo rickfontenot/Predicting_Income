@@ -1,0 +1,8 @@
+"0","pred <- prediction(pred.val1[,2], dat.val1.rf$income)
+RF.roc = roc(response=dat.val1.rf$income,predictor=pred.val1[,2],levels=c(""<=50K"","">50K""))
+"
+"2","Setting direction: controls < cases
+"
+"0","auc.train <- performance(pred, measure = ""auc"")"
+"0","auc.train <- auc.train@y.values"
+"0","plot(RF.roc,print.thres=""best"", main=""Random Forest"")"

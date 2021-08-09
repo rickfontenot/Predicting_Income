@@ -1,0 +1,7 @@
+"0","#Replace ""?"" with NA and re-do missing value analysis"
+"0","adult[, 1:14][adult[, 1:14] == "" ?""] <- NA"
+"0",""
+"0","aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c(""Percent data missing"",""Combinations Missing""), prop=FALSE,cex.numbers=0.8)"
+"1","
+ Variables sorted by number of missings: 
+"

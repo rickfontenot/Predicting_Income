@@ -1,0 +1,7 @@
+"0","hours_per_week <- adult"
+"0","hours_per_week$income.binary<-0"
+"0","hours_per_week$income.binary[hours_per_week$income=="" >50K""] <- 1"
+"0",""
+"0","hours_per_week_rates <- hours_per_week %>% group_by(hours_per_week) %>% summarise(n=n(),income_above = mean(income.binary))"
+"0",""
+"0","hours_per_week_rates %>% ggplot(mapping=aes(y=income_above, x=hours_per_week)) + geom_point(aes(size=n))+  labs(title=""%Income above 50K vs hours_per_week"")"

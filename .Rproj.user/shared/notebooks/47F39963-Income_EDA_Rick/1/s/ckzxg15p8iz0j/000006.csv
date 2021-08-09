@@ -1,0 +1,5 @@
+"0","education = table(adult$income, adult$education)"
+"0","mosaicplot(education, shade = TRUE, las=2, main = ""education"", pop = FALSE)"
+"2","In mosaicplot.default(education, shade = TRUE, las = 2, main = ""education"", 
+    pop = FALSE) :
+ extra argument ‘pop’ will be disregarded"

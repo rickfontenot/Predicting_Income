@@ -1,0 +1,22 @@
+"0","#Setup Training set"
+"0","complex.train <- train_na_as_cat %>% select(features.complex,""income"")"
+"2","Note: Using an external vector in selections is ambiguous.
+[34mℹ[39m Use `all_of(features.complex)` instead of `features.complex` to silence this message.
+[34mℹ[39m See <https://tidyselect.r-lib.org/reference/faq-external-vector.html>.
+[90mThis message is displayed once per session.[39m
+"
+"0","complex.train$income <- as.factor(complex.train$income)"
+"0",""
+"0","#Run Model"
+"0","complex.model1 <- glm(income ~ .,family=""binomial"",data=complex.train)"
+"2","glm.fit: fitted probabilities numerically 0 or 1 occurred"
+"0","#Setup Test set"
+"0","complex.test <- test_na_as_cat %>% select(features.complex,""income"")"
+"0","complex.test$income <- as.factor(complex.test$income)"
+"0",""
+"0","#Make Predictions and check performance"
+"0","predprobs<-predict(complex.model1,complex.test,type=""response"")"
+"0","complex.roc<-roc(response=complex.test$income,predictor=predprobs,levels=c(""<=50K"","">50K""))"
+"2","Setting direction: controls < cases
+"
+"0","plot(complex.roc,print.thres=""best"", main=""Complex Logistic Regression"") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR"

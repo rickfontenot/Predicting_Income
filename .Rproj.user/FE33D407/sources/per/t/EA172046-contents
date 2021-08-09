@@ -1,0 +1,147 @@
+library(caret)
+library(ROCR)   #New package  (ROC curves)
+library(pROC)
+library(GGally)
+library(e1071)  #New package  (logisitic)
+
+
+setwd("/Users/rickfontenot/Dropbox/SMU/DS6372 Applied Statistics/Unit 13/Unit13")
+dat <- read.csv("CancerExample.csv", header = TRUE)
+
+#Get Training and Test Set Set
+training <- dat[which(dat$Set == "Training"),]
+test <- dat[which(dat$Set == "Validation I"),]
+
+
+#Turner will tell the story of this data set.  Which will address workflow #1.
+View(training) #Response variable is the censor column  1 cancer, 0-no cancer  Predictors are V1-V9
+
+#Workflow number 2
+#Cleaning the data.  Only need the censor column and 9 predictors
+#Must convert binary numerics to factors.  Also a good idea to use something other than 0 or 1
+names(training)
+training<-training[,c(5:14)]
+training$Status<-factor(ifelse(training$Censor==1,"Cancer","Healthy"))
+
+test<-test[,c(5:14)]
+test$Status<-factor(ifelse(test$Censor==1,"Cancer","Healthy"))
+
+#3 EDA
+#Since all predictors are continuous, we should do some basic scatterplots and boxplots to see whats going on
+
+#Scatterplots of the 9 predictors color coded by censor
+myplots<-ggpairs(training,mapping=ggplot2::aes(colour=Status),lower=list(continuous=wrap("points",size=0.5)))
+myplots
+
+boxplot(V1~Status,data=training,col=c("orange","blue"))
+boxplot(V2~Status,data=training,col=c("orange","blue"))
+#and so on
+
+#Key Take aways from the graphs
+#1. The data set is balanced (top left corner bar chart) so a cutoff of 0.5 to make predictions will probably be okay.  We will still check.
+#2. There is no direct seperation between the cancer and no cancer groups but there are some shift in medians via the boxplots for all of the variables.
+#3. While the separtion is not obvious, it is clear that many cancer observations have much higher values.  Some cancer observations are mixed in with the healthy.
+#4.  It looks like linear classification boundaries (simple models) would be okay to use.  We can verify when comparing models.
+
+
+#4.  Fit models from caret
+#COMMENT:  For a balanced data set, using overall accuracy as metric is most likely fine to use during CV. I'll show an example later perforing CV using the AUC metric.
+#fitControl<-trainControl(method="repeatedcv",number=10,repeats=10,classProbs=T,summaryFunction = twoClassSummary) #number is the k in k-fold
+fitControl<-trainControl(method="repeatedcv",number=10,repeats=10)
+set.seed(1234)
+logistic.fit<-train(Status~V1+V2+V3+V4+V5+V6+V7+V8+V9,
+              data=training,
+              method="glmnet",
+              trControl=fitControl,
+              metric="Accuracy")
+
+logistic.fit
+
+#Comput ROC curve on the test set
+log.predprobs<-predict(logistic.fit,test,type="prob")
+head(log.predprobs)
+
+#It is important to NOTE what predicted probabilities you give this line as well as specifying
+#the levels.  Make sure everything matches and makes sense.  In levels make your "yes" level the second
+#one.  "Yes is often referred to as "Cases".  "No"="Controls"
+log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+
+
+
+
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted interms of specificity rather than FPR
+auc(log.roc)
+
+
+
+#The function and graph above is great as it already tells you the sensitivity and the specificity for the given cutoff.
+#The bottom code is to do it manually.  This is helpful if you want to play around witht threshold a little bit.  It also
+#gives you the accuracy which you'll want to report as well.
+
+
+threshold=.115
+log.predclass<-ifelse(log.predprobs$Cancer>threshold,"Cancer","Healthy")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,test$Status)
+
+
+#Suppose we were okay with specificity being a little lower and we wanted sensitivity a little higher
+#To do this we need to predict cancer more often that we already do.  So lets lower the threshold even more.
+#This will take some trial and error
+threshold=.05
+log.predclass<-ifelse(log.predprobs$Cancer>threshold,"Cancer","Healthy")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,test$Status)
+
+#We have to be careful when doing this because the test set is a bit unbalanced, while the training data set was balanced. This threshold will work for future data
+#sets if they behave like this particular test set.  Without using additional strategies, the best course
+#of action is to have what ever balance is going on with the training set be reflective of what is coming
+#down the road.  Dealing with unbalanced data can be tricky.  Its a "rare event" problem.
+#Its probably a little safer to work using the ROC as a metric for picking models instead.  See below.
+
+
+
+
+
+######################
+#Another example using AUC instead of accuracy to select the best models
+#This is a better way to go if you know you are going to be dealing with any sort of unbalanced issues
+
+fitControl<-trainControl(method="repeatedcv",number=10,repeats=10,classProbs=T,summaryFunction = twoClassSummary) #number is the k in k-fold
+set.seed(1234)
+logistic.fit<-train(Status~V1+V2+V3+V4+V5+V6+V7+V8+V9,
+                    data=training,
+                    method="glmnet",
+                    trControl=fitControl,
+                    metric="ROC")
+
+logistic.fit
+
+#Comput ROC curve on the test set
+log.predprobs<-predict(logistic.fit,test,type="prob")
+head(log.predprobs)
+
+#It is important to NOTE what predicted probabilities you give this line as well as specifying
+#the levels.  Make sure everything matches and makes sense.  In levels make your "yes" level the second
+#one.  "Yes is often referred to as "Cases".  "No"="Controls"
+log.roc<-roc(response=test$Status,predictor=log.predprobs$Cancer,levels=c("Healthy","Cancer"))
+
+
+
+
+plot(log.roc,print.thres="best") #This graph is nice because the x axis is plotted interms of specificity rather than FPR
+auc(log.roc)
+
+
+
+#The function and graph above is great as it already tells you the sensitivity and the specificity for the given cutoff.
+#The bottom code is to do it manually.  This is helpful if you want to play around witht threshold a little bit.  It also
+#gives you the accuracy which you'll want to report as well.
+
+
+threshold=
+log.predclass<-ifelse(log.predprobs$Cancer>threshold,"Cancer","Healthy")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,test$Status)
+
+

@@ -1,0 +1,11 @@
+"0","#occupation missing 5.66% of values"
+"0","#workclass missing 5.64% of values"
+"0","#native-country missing 1.79& of values"
+"0","#Note that half of the missing workclass values occur on observations that are also missing occupation"
+"0",""
+"0","#See how important occupation and workclass are to explaining income"
+"0","occupation = table(adult$income, adult$occupation)"
+"0","mosaicplot(occupation, shade = TRUE, las=2, main = ""occupation"", pop = FALSE)"
+"2","In mosaicplot.default(occupation, shade = TRUE, las = 2, main = ""occupation"", 
+    pop = FALSE) :
+ extra argument ‘pop’ will be disregarded"

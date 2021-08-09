@@ -1,0 +1,2 @@
+"0",""
+"0","ggplot(data = adult, aes(x=relationship, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))"

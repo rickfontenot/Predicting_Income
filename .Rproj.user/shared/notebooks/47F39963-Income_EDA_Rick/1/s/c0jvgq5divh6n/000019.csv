@@ -1,0 +1,17 @@
+"0","standardize = preProcess(train_na_as_cat, method = c(""center"", ""scale""))
+standardized.train_na_as_cat = predict(standardize, train_na_as_cat)
+standardized.test_na_as_cat = predict(standardize, test_na_as_cat)
+
+#Training Set
+dat.train.x <- standardized.train_na_as_cat %>% select(continuous.predictors,""income"")
+dat.train.x$income <- as.factor(dat.train.x$income)
+dat.train.y <- standardized.train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#Check distributions after standardizing
+hist.data.frame(dat.train.x, nclass=20)
+
+#Boxplot capital gain/loss to check for outliers
+boxplot(dat.train.x$capital_gain)
+"
+"0","boxplot(dat.train.x$capital_loss)"

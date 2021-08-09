@@ -1,0 +1,2 @@
+"0",""
+"0","test.set2%>% ggplot(aes(x = Life.expectancy, y = prediction)) + geom_point(size=0.5)+geom_jitter()+ geom_abline(intercept = 0)"

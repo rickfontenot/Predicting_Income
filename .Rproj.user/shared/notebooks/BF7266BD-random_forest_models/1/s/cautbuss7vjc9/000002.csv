@@ -1,0 +1,7 @@
+"0","rf_3 <- train(income~., "
+"0","                      data=new_train, "
+"0","                      method='rf', "
+"0","                      metric='ROC',"
+"0","                      trControl = ctrl)"
+"2","
+"

@@ -1,0 +1,103 @@
+"0","library(glmnet)"
+"2","Loading required package: Matrix
+"
+"2","
+Attaching package: ‘Matrix’
+
+"
+"2","The following objects are masked from ‘package:tidyr’:
+
+    expand, pack, unpack
+
+"
+"2","Loaded glmnet 4.1-1
+"
+"0","library(ROCR)"
+"0","library(MASS)"
+"2","
+Attaching package: ‘MASS’
+
+"
+"2","The following object is masked from ‘package:dplyr’:
+
+    select
+
+"
+"0","library(ggplot2)"
+"0","library(pheatmap)"
+"0","library(randomForest)"
+"2","randomForest 4.6-14
+"
+"2","Type rfNews() to see new features/changes/bug fixes.
+"
+"2","
+Attaching package: ‘randomForest’
+
+"
+"2","The following object is masked from ‘package:dplyr’:
+
+    combine
+
+"
+"2","The following object is masked from ‘package:ggplot2’:
+
+    margin
+
+"
+"0","library(dplyr)"
+"0","library(tidyverse)"
+"0","library(VIM)"
+"0","library(caret)"
+"0","library(corrplot)"
+"2","corrplot 0.88 loaded
+"
+"0","library(ggplot2) "
+"0","library(ggthemes)"
+"0","library(vcd)"
+"0","#install.packages(""gtsummary"")"
+"0","library(gtsummary)"
+"2","#Uighur
+"
+"2","
+Attaching package: ‘gtsummary’
+
+"
+"2","The following object is masked from ‘package:MASS’:
+
+    select
+
+"
+"0","library(Hmisc)"
+"2","Loading required package: survival
+"
+"2","
+Attaching package: ‘survival’
+
+"
+"2","The following object is masked from ‘package:caret’:
+
+    cluster
+
+"
+"2","Loading required package: Formula
+"
+"2","Registered S3 method overwritten by 'htmlwidgets':
+  method           from         
+  print.htmlwidget tools:rstudio
+"
+"2","
+Attaching package: ‘Hmisc’
+
+"
+"2","The following objects are masked from ‘package:dplyr’:
+
+    src, summarize
+
+"
+"2","The following objects are masked from ‘package:base’:
+
+    format.pval, units
+
+"
+"0","library(pROC)"
+"0",""

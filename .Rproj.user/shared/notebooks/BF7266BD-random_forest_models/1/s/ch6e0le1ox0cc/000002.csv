@@ -1,0 +1,4 @@
+"0","ctrl <- trainControl(method = ""cv"","
+"0","                     number = 3,"
+"0","                     classProbs = T,"
+"0","                     summaryFunction = twoClassSummary)"

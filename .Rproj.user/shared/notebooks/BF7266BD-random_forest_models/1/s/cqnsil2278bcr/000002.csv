@@ -1,0 +1,1 @@
+"0","ggpairs(adult,columns=c(1,3,5,11,12,13),aes(colour=income))"

@@ -1,0 +1,2305 @@
+---
+title: 'Predicting Income: EDA'
+author: "Rick Fontenot"
+date: "7/15/2021"
+output:
+  html_document:
+    self_contained: false
+    lib_dir: libs
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(glmnet)
+library(ROCR)
+library(MASS)
+library(ggplot2)
+library(pheatmap)
+library(randomForest)
+library(dplyr)
+library(tidyverse)
+library(VIM)
+library(caret)
+library(corrplot)
+library(ggplot2) 
+library(ggthemes)
+library(vcd)
+#install.packages("gtsummary")
+library(gtsummary)
+library(Hmisc)
+library(pROC)
+
+```
+
+Load Theme for plots
+
+```{r}
+theme_set(theme_fivethirtyeight())
+theme_update(axis.title = element_text()) #the default for fivethirtyeight is to not show axis labels, this removes that default so we can choose to specify and display axis titles
+theme_update(plot.title = element_text(hjust = 0.5)) # changing default to center all titles
+```
+
+Load Data downloaded from UCI and stored on github repo
+https://archive.ics.uci.edu/ml/datasets/Adult
+
+```{r load data}
+adult = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/adult.data", header = FALSE)
+```
+
+Description of variables from UCI:
+
+Response: >50K, <=50K.
+
+age: continuous.
+workclass: Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked.
+fnlwgt: continuous.
+education: Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool.
+education-num: continuous.
+marital-status: Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse.
+occupation: Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handlers-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces.
+relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried.
+race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black.
+sex: Female, Male.
+capital-gain: continuous.
+capital-loss: continuous.
+hours-per-week: continuous.
+native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands.
+
+Add column names to data set:
+```{r}
+# NOTE: names using underscore instead of hyphen so they can be referenced easier later
+colnames(adult) <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income")
+
+```
+
+Examine formats of data available
+
+```{r}
+str(adult)
+
+adult[, 1:14][adult[, 1:14] == " ?"] <- "no_response"
+
+#Convert character vars to factors and make list of vars
+adult$workclass <- as.factor(adult$workclass)
+adult$education <- as.factor(adult$education)
+adult$marital_status <- as.factor(adult$marital_status)
+adult$occupation <- as.factor(adult$occupation)
+adult$relationship <- as.factor(adult$relationship)
+adult$race <- as.factor(adult$race)
+adult$sex <- as.factor(adult$sex)
+adult$native_country <- as.factor(adult$native_country)
+adult$income <- as.factor(adult$income)
+
+categorical.explanatory = c("workclass","education","marital_status","occupation","relationship","race","sex","native_country")
+
+str(adult)
+
+```
+Investigate NA values to determine what needs resolution
+
+```{r}
+#Replace "?" with NA and re-do missing value analysis
+adult[, 1:14][adult[, 1:14] == " ?"] <- NA
+
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"), prop=FALSE,cex.numbers=0.8)
+
+#occupation missing 5.66% of values
+#workclass missing 5.64% of values
+#native-country missing 1.79& of values
+#Note that half of the missing workclass values occur on observations that are also missing occupation
+
+#See how important occupation and workclass are to explaining income
+occupation = table(adult$income, adult$occupation)
+mosaicplot(occupation, shade = TRUE, las=2, main = "occupation", pop = FALSE)
+occupationchisq <- chisq.test(occupation) 
+occupationchisq #p-value = 2,2e-16
+#As expected almost all occupation types have significant differences between income groups
+#Danger of using MICE to impute an incorrect value, are there correlations?
+
+workclass = table(adult$income, adult$workclass)
+mosaicplot(workclass, shade = TRUE, las=2, main = "workclass", pop = FALSE)
+workclasschisq <- chisq.test(workclass) 
+workclasschisq #p-value = 2,2e-16
+#Danger of using MICE to impute an incorrect value, are there correlations?
+#May look at reducing levels to Government, Private, Self-Employed, Unemployed
+
+```
+
+
+Summary Statistics for Categorical variables & Distributions for Numerical variables
+
+
+```{r}
+categorical <- adult %>% select(categorical.explanatory, income)
+categorical %>% tbl_summary()
+
+hist.data.frame(adult %>% select(-categorical.explanatory,-income),nclass=20)
+
+lognumeric <- adult %>% select(-categorical.explanatory,-income)
+lognumeric[paste0('log_',names(lognumeric))] <- lapply(lognumeric, function(x) log(x+0.01))
+lognumeric <- lognumeric %>% select(-age,-fnlwgt,-education_num,-capital_gain,-capital_loss,-hours_per_week)
+
+hist.data.frame(lognumeric, nclass=20)
+
+str(lognumeric)
+library(rstatix)
+shapiro.test(lognumeric$log_age)
+
+qqnorm(adult$age)
+qqnorm(lognumeric$log_age)
+
+adult %>% ggplot(aes(sample = age)) + geom_qq() + geom_qq_line() + labs(y="Age")
+lognumeric %>% ggplot(aes(sample = log_age)) + geom_qq() + geom_qq_line() + labs(y="Log(Age)") 
+
+adult %>% ggplot(aes(sample = capital_gain)) + geom_qq() + geom_qq_line() + labs(y="capital_gain")
+lognumeric %>% ggplot(aes(sample = log_capital_gain)) + geom_qq() + geom_qq_line() + labs(y="Log(capital_gain)") 
+
+```
+
+Check initial simple logistic regression with no cleaning or additional features
+(Dropped all NA, dropped fnlwgt, no imputing of missing values)
+*Note occupation and native_country not significant
+
+AIC: 16561
+Accuracy : 0.8188 
+Sensitivity : 0.9369          
+Specificity : 0.4584 **Poor Specificity
+
+```{r}
+logit.set <- adult %>% select(-fnlwgt)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+```
+Explore Categorical Varaibles vs. Income 
+
+workclass: reducing levels into work_sector improves model performance and simplifies interpretability so choosing to replace workclass
+
+AIC: 16511 vs original 16561 -->improved
+Accuracy : 0.8201 vs original 0.8188 -->improved
+Sensitivity : 0.9395 vs original 0.9369 --> improved        
+Specificity : 0.4571 vs original 0.4584 -->dropped just a little
+
+```{r workclass}
+workclass = table(adult$income, adult$workclass)
+mosaicplot(workclass, shade = TRUE, las=2, main = "workclass", pop = FALSE)
+workclasschisq <- chisq.test(workclass) 
+workclasschisq
+#X-squared = 827.72 , p-value=2.2e-16
+
+#Evaluate reducing levels to Government, Private, Self-Employed, Other
+adult$workclass <- trimws(adult$workclass)
+adult$work_sector <- "Other"
+adult$work_sector[adult$workclass %in% c("Federal-gov","Local-gov","State-gov")] <- "Government"
+adult$work_sector[adult$workclass %in% c("Private")] <- "Private"
+adult$work_sector[adult$workclass %in% c("Self-emp-inc","Self-emp-not-inc")] <- "Self_Employed"
+adult$work_sector[adult$workclass %in% c("Never-worked","Without-pay")] <- "Not_Working"
+adult$work_sector = as.factor(adult$work_sector)
+
+work_sector = table(adult$income, adult$work_sector)
+mosaicplot(work_sector, shade = TRUE, las=2, main = "work_sector", pop = FALSE)
+work_sectorchisq <- chisq.test(work_sector) 
+work_sectorchisq
+#X-squared = 565.28 , p-value=2.2e-16
+#Since X-Square decreased the difference between levels is not quite as strong but does simplify
+
+#Re-run regression with work_sector to compare to workclass
+logit.set <- adult %>% select(-fnlwgt,-workclass)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$work_sector <- as.numeric(logit.set$work_sector)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+```
+
+education
+
+```{r education}
+education = table(adult$income, adult$education)
+mosaicplot(education, shade = TRUE, las=2, main = "education", pop = FALSE)
+educationchisq <- chisq.test(education) 
+educationchisq
+#X-squared = 4429.7 , p-value=2.2e-16
+#Hard to read since factor levels not in proper order
+
+adult$education <- trimws(adult$education)
+
+adult %>% mutate(education = fct_reorder(education, education_num)) %>% ggplot(aes(x=education,y=education_num)) + 
+  geom_boxplot()+ labs(title= "education vs education_num" , x = "Level", y= "Number") +
+  theme(axis.text.x=element_text(angle=45,hjust=1))
+
+#Note these two columns are the same info, which is better categorical or numerical? Based on initial logistic regression the numeric has lower p-value and more significance
+```
+
+marital_status: reducing levels into marriage_status improves model performance and simplifies interpretability so choosing to replace marital_status
+
+AIC: 14470 vs original 16561 -->improved
+Accuracy : 0.832 vs original 0.8188 -->improved
+Sensitivity : 0.9237 vs original 0.9369 --> dropped a little        
+Specificity : 0.5656 vs original 0.4584 -->improved
+
+```{r marital_status}
+marital_status = table(adult$income, adult$marital_status)
+mosaicplot(marital_status, shade = TRUE, las=2, main = "marital_status", pop = FALSE)
+marital_statuschisq <- chisq.test(marital_status) 
+marital_statuschisq
+#X-squared = 6518 , p-value=2.2e-16
+
+#Evaluate reducing levels to Married, Single, Previously-Married
+adult$marital_status <- trimws(adult$marital_status)
+adult$marriage_status <- "Other"
+adult$marriage_status[adult$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+adult$marriage_status[adult$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+adult$marriage_status[adult$marital_status %in% c("Never-married")] <- "Single"
+adult$marriage_status = as.factor(adult$marriage_status)
+
+marriage_status = table(adult$income, adult$marriage_status)
+mosaicplot(marriage_status, shade = TRUE, las=2, main = "marriage_status", pop = FALSE)
+marriage_statuschisq <- chisq.test(marriage_status) 
+marriage_statuschisq
+#X-squared = 6509 , p-value=2.2e-16
+#Only slight decrease in X-squared much easier to interpret
+
+#Relationship may be correlated
+#Do marital status + gender = relationship status?
+marriage_vs_relationship = table(adult$relationship, adult$marriage_status)
+marriage_vs_relationship
+chisq.test(marriage_vs_relationship)
+
+#Re-run regression with marriage_status to compare to workclass
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marital_status)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+```
+
+occupation: reducing levels into collar improves model performance and simplifies interpretability so choosing to replace occupation which was not significant in original model anyways
+
+AIC: 16362 vs original 16561 -->improved
+Accuracy : 0.8248 vs original 0.8188 -->improved
+Sensitivity : 0.9385 vs original 0.9369 --> improved        
+Specificity : 0.4724 vs original 0.4584 -->improved
+
+```{r occupation}
+occupation = table(adult$income, adult$occupation)
+mosaicplot(occupation, shade = TRUE, las=2, main = "occupation", pop = FALSE)
+occupationchisq <- chisq.test(occupation) 
+occupationchisq
+#X-squared = 3745 , p-value = 2,2e-16
+
+occupation_vs_workclass = table(adult$occupation, adult$workclass)
+occupation_vs_workclass
+chisq.test(occupation_vs_workclass) 
+
+#Evaluate reducing levels to Government, Private, Self-Employed, Other
+adult$occupation <- trimws(adult$occupation)
+adult$collar <- "Other"
+adult$collar[adult$occupation %in% c("Adm-clerical")] <- "White-support"
+adult$collar[adult$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+adult$collar[adult$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+adult$collar = as.factor(adult$collar)
+
+collar = table(adult$income, adult$collar)
+mosaicplot(collar, shade = TRUE, las=2, main = "Collar (Occupation Group)", pop = FALSE)
+collarchisq <- chisq.test(collar) 
+collarchisq
+#X-squared = 2884 , p-value = 2,2e-16 
+# **Reduced X-squared but still significant check regression effect
+
+#Re-run regression with collar to compare to workclass
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-occupation)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$collar <- as.numeric(logit.set$collar)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+```
+
+relationship
+
+```{r relationship}
+
+relationship = table(adult$income, adult$relationship)
+mosaicplot(relationship, shade = TRUE, las=2, main = "relationship", pop = FALSE)
+relationshipchisq <- chisq.test(relationship) 
+relationshipchisq
+#X-squared = 6699 , p-value = 2,2e-16
+
+#Appears to be correlated with Marriage_status and sex, drop from model and compare
+
+```
+
+race
+
+```{r race}
+race = table(adult$income, adult$race)
+mosaicplot(race, shade = TRUE, las=2, main = "race", pop = FALSE)
+racechisq <- chisq.test(race) 
+racechisq
+#X-squared = 331 , p-value = 2,2e-16
+
+race_vs_native_country = table(adult$race, adult$native_country)
+race_vs_native_country
+chisq.test(race_vs_native_country) 
+```
+
+sex
+
+```{r sex}
+sex = table(adult$income, adult$sex)
+mosaicplot(sex, shade = TRUE, las=2, main = "sex", pop = FALSE)
+sexchisq <- chisq.test(sex) 
+sexchisq
+#X-squared = 1518 , p-value = 2,2e-16
+```
+
+native_country
+
+```{r native_country}
+#see above this is correlated to race which may be better predictor
+
+native_country = table(adult$income, adult$native_country)
+mosaicplot(native_country, shade = TRUE, las=2, main = "race", pop = FALSE)
+native_countrychisq <- chisq.test(native_country) 
+native_countrychisq
+#X-squared = NaN , p-value = NA
+
+#Reduce to Native Born and Foreign Born then compare model
+adult$native_country <- trimws(adult$native_country)
+adult$native_born <- "No"
+adult$native_born[adult$native_country %in% c("United-States")] <- "Yes"
+adult$native_born = as.factor(adult$native_born)
+
+native_born = table(adult$income, adult$native_born)
+mosaicplot(native_born, shade = TRUE, las=2, main = "native_born", pop = FALSE)
+native_bornchisq <- chisq.test(native_born) 
+native_bornchisq
+#X-squared = 38.426 , p-value = 5.688e-10 
+
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-collar,-native_country)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$native_born <- as.numeric(logit.set$native_born)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+
+#Change to US, Mexico, and other then compare model
+adult$native_country <- trimws(adult$native_country)
+adult$birthplace <- "Other"
+adult$birthplace[adult$native_country %in% c("United-States")] <- "USA"
+adult$birthplace[adult$native_country %in% c("Mexico")] <- "Mexico"
+adult$birthplace = as.factor(adult$birthplace)
+
+birthplace = table(adult$income, adult$birthplace)
+mosaicplot(birthplace, shade = TRUE, las=2, main = "birthplace", pop = FALSE)
+birthplacechisq <- chisq.test(birthplace) 
+birthplacechisq
+#X-squared = 131.53 , p-value = 2.2e-16 
+
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-collar,-native_country,-native_born)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-collar,-native_country,-native_born, -birthplace)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+
+#Note none of these show as significant in the model, drop all
+```
+
+Explore numerical variables vs income
+
+capital_gain
+
+```{r capital_gain}
+adult$income.binary<-0
+adult$income.binary[adult$income==" >50K"] <- 1
+adult$income.binary = as.factor(adult$income.binary)
+
+capital_gain <- adult %>% group_by(capital_gain) %>% summarise(income_above = mean(income.binary))
+
+capital_gain %>% ggplot(mapping=aes(y=income_above, x=capital_gain)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs education_num")
+
+#Not a usefull plot need to bin capital gains
+
+capital_gain <- adult %>% mutate(capital_gain_bin = cut(capital_gain, seq(min(capital_gain), max(capital_gain) + 10000, 10000), right = FALSE))
+
+capital_gain_rates <- capital_gain %>% group_by(capital_gain_bin) %>% summarise(n=n(),income_above = mean(income.binary))
+
+capital_gain_rates %>% ggplot(mapping=aes(y=income_above, x=capital_gain_bin)) + geom_point(aes(size=n))+  labs(title="%Income above 50K vs capital_gain_bin")+geom_text(aes(label=n),hjust=-0.5, vjust=0.5)
+
+#Create Bins for yes/no on capital gains
+adult$capital_gain_bin <- "No"
+adult$capital_gain_bin[adult$capital_gain > 0] <- "Yes"
+adult$capital_gain_bin = as.factor(adult$capital_gain_bin)
+
+
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-collar,-native_country,-native_born, -birthplace,-capital_gain)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$capital_gain_bin <- as.factor(logit.set$capital_gain_bin)
+logit.set$capital_gain_bin <- as.numeric(logit.set$capital_gain_bin)
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+```
+
+capital_loss
+
+```{r capital_loss}
+capital_loss <- adult %>% group_by(capital_loss) %>% summarise(income_above = mean(income.binary))
+
+capital_loss %>% ggplot(mapping=aes(y=income_above, x=capital_loss)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs education_num")
+
+#Not a usefull plot need to bin capital gains
+
+capital_loss <- adult %>% mutate(capital_loss_bin = cut(capital_loss, seq(min(capital_loss), max(capital_loss) + 1000, 1000), right = FALSE))
+
+capital_loss_rates <- capital_loss %>% group_by(capital_loss_bin) %>% summarise(n=n(),income_above = mean(income.binary))
+
+capital_loss_rates %>% ggplot(mapping=aes(y=income_above, x=capital_loss_bin)) + geom_point(aes(size=n))+  labs(title="%Income above 50K vs capital_loss_bin")+geom_text(aes(label=n),hjust=-0.5, vjust=0.5)
+
+#Create Bins for yes/no on capital gains
+adult$capital_loss_bin <- "No"
+adult$capital_loss_bin[adult$capital_loss > 0] <- "Yes"
+adult$capital_loss_bin = as.factor(adult$capital_loss_bin)
+
+
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-collar,-native_country,-native_born, -birthplace,-capital_gain_bin,-capital_loss)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$capital_loss_bin <- as.factor(logit.set$capital_loss_bin)
+logit.set$capital_loss_bin <- as.numeric(logit.set$capital_loss_bin)
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+```
+Look at binning to just some capital gain or loss vs zero
+
+```{r capital}
+#Create Bins for yes/no on capital gains
+adult$capital_gain_or_loss <- "No"
+adult$capital_gain_or_loss[(adult$capital_loss+adult$capital_gain > 0)] <- "Yes"
+adult$capital_gain_or_loss = as.factor(adult$capital_gain_or_loss)
+
+
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-work_sector,-marriage_status,-collar,-native_country,-native_born, -birthplace,-capital_gain_bin,-capital_loss_bin,-capital_gain,-capital_loss)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$capital_gain_or_loss <- as.factor(logit.set$capital_gain_or_loss)
+logit.set$capital_gain_or_loss <- as.numeric(logit.set$capital_gain_or_loss)
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+logit.set$education <- as.factor(logit.set$education)
+logit.set$education <- as.numeric(logit.set$education)
+logit.set$marital_status <- as.factor(logit.set$marital_status)
+logit.set$marital_status <- as.numeric(logit.set$marital_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+#adult <- adult %>% select(-work_sector)
+```
+
+age
+```{r age}
+adult$income.binary<-0
+adult$income.binary[adult$income==" >50K"] <- 1
+age_rates <- adult %>% group_by(age) %>% summarise(income_above = mean(income.binary))
+
+age_rates %>% ggplot(mapping=aes(y=income_above, x=age)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs Age")
+#Note this relationship is not linear, can it be transformed?
+
+linearModel <- lm(income_above ~ age, data=age_rates)
+summary(linearModel)
+#Adj. R2 ~=0 age is not significant
+
+age_rates$age2 = age_rates$age^2
+quadraticModel2 <- lm(income_above ~ age + age2, data=age_rates)
+summary(quadraticModel2)
+#Adj. R2 = 0.726 and second order term is significant
+#income = -0.49214 + 0.0316588*age - 0.0002959*age^2
+
+age <- seq(from = 17, to = 90, by = 1)
+second_order<- data.frame(age)
+second_order$income_above <- -0.49214 + 0.0316588*second_order$age - 0.0002959*second_order$age^2
+ggplot(age_rates, aes(y=income_above, x=age)) + geom_point() +geom_line(data = second_order) +  labs(title="%Income above 50K vs Age + Age^2")
+
+age_rates$age3 = age_rates$age^3
+quadraticModel3 <- lm(income_above ~ age + age2 + age3, data=age_rates)
+summary(quadraticModel3)
+#Adj. R2 = 0.78 and third order term is significant
+#income = -0.9188 + 0.06215*age - 0.0009301*age^2 + 0.000003979*age^3
+
+third_order<- data.frame(age)
+third_order$income_above <- -0.9188 + 0.06215*third_order$age - 0.0009301*third_order$age^2 + 0.000003979*age^3
+ggplot(age_rates, aes(y=income_above, x=age)) + geom_point() +geom_line(data = third_order) +  ggtitle("%Income above 50K vs Age") + ylim(0, 0.5) + theme(plot.title=element_text(size=24,face="bold")) + annotate('text', x = 50, y = 0.48, label = 'Income above = -0.92 + 0.062*Age - 0.0009*Age^2 + 0.000004*Age^3')
+
+
+#How can we transform this for regression? or should we add Age^2 and Age^3 to model?
+
+age_rates$income_above_odds = age_rates$income_above / (1 - age_rates$income_above)
+age_rates$log_income_above_odds = log(age_rates$income_above_odds)
+age_rates %>% ggplot(mapping=aes(y=log_income_above_odds, x=age)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs Age")
+
+```
+
+Re-check logistic regression with Age^2 and Age^3
+Both Terms are significant
+
+AIC: 14568 vs original 14884 -->improved
+Accuracy : 0.8391 vs original 0.8382 -->improved
+Sensitivity : 0.9315 vs original 0.9321 --> dropped a little        
+Specificity : 0.5655 vs original 0.5640 -->improved
+
+```{r}
+logit.set <- adult %>% select(-fnlwgt,-education,-marital_status,-relationship,-native_country)
+logit.set$age2 = logit.set$age^2
+logit.set$age3 = logit.set$age^3
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$workclass <- as.factor(logit.set$workclass)
+logit.set$workclass <- as.numeric(logit.set$workclass)
+#logit.set$education <- as.numeric(logit.set$education)
+#logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$occupation <- as.factor(logit.set$occupation)
+logit.set$occupation <- as.numeric(logit.set$occupation)
+#logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$native_country <- as.numeric(logit.set$native_country)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+```
+
+fnlwgt
+
+```{r fnlwgt}
+fnlwgt_rates <- adult %>% group_by(fnlwgt) %>% summarise(income_above = mean(income.binary))
+
+fnlwgt_rates %>% ggplot(mapping=aes(y=income_above, x=fnlwgt)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs fnlwgt")
+
+#No relationship, as mentioned previously drop this variable
+```
+
+education_num
+
+```{r education_num}
+education_num_rates <- adult %>% group_by(education_num) %>% summarise(income_above = mean(income.binary))
+
+education_num_rates %>% ggplot(mapping=aes(y=income_above, x=education_num)) + geom_point(size=1.5)+  labs(title="%Income above 50K vs education_num")
+
+#Note this relationship is not linear, check quadratic transformation
+
+linearModel <- lm(income_above ~ education_num, data=education_num_rates)
+summary(linearModel)
+#Adj. R2 =0.7858
+
+education_num_rates$education_num2 = education_num_rates$education_num^2
+quadraticModel2 <- lm(income_above ~ education_num + education_num2, data=education_num_rates)
+summary(quadraticModel2)
+#Adj. R2 = 0.9637 and second order term is significant
+#income = 0.1005427 - 0.0422404*education_num - 0.0052366*education_num^2
+
+education_num <- seq(from = 1, to = 16, by = 1)
+second_order<- data.frame(education_num_rates)
+second_order$income_above <- 0.1005427 - 0.0422404*second_order$education_num + 0.0052366*second_order$education_num^2
+ggplot(education_num_rates, aes(y=income_above, x=education_num)) + geom_point() +geom_line(data = second_order) +  ggtitle("%Income above 50K vs Education") + ylim(0, 0.75) + theme(plot.title=element_text(size=24,face="bold")) + annotate('text', x = 9, y = 0.65, label = 'Income above = 0.1 - 0.042*Education - 0.005*Education^2')
+
+#Second degree quadratic fits well, add Education^2 to logistic regression
+```
+
+hours_per_week
+
+```{r hours}
+hours_per_week_rates <- adult %>% group_by(hours_per_week) %>% summarise(n=n(),income_above = mean(income.binary))
+
+hours_per_week_rates %>% ggplot(mapping=aes(y=income_above, x=hours_per_week)) + geom_point(aes(size=n))+  labs(title="%Income above 50K vs hours_per_week")
+
+#Doesn't appear linear, explore quadratic fits
+
+linearModel <- lm(income_above ~ hours_per_week, data=hours_per_week_rates)
+summary(linearModel)
+#Adj. R2 =0.15
+
+hours_per_week_rates$hours_per_week2 = hours_per_week_rates$hours_per_week^2
+quadraticModel2 <- lm(income_above ~ hours_per_week + hours_per_week2, data=hours_per_week_rates)
+summary(quadraticModel2)
+#Adj. R2 = 0.2366 and second order term is significant
+#income = -0.04471 + 0.01044*hours_per_week - 0.00007831*hours_per_week^2
+
+hours_per_week <- seq(from = 1, to = 99, by = 1)
+second_order<- data.frame(hours_per_week)
+second_order$income_above <- -0.04471 + 0.01044*second_order$hours_per_week - 0.00007831*second_order$hours_per_week^2
+ggplot(hours_per_week_rates, aes(y=income_above, x=hours_per_week)) + geom_point() +geom_line(data = second_order) +  ggtitle("%Income above 50K vs hours_per_week") + theme(plot.title=element_text(size=24,face="bold")) + annotate('text', x = 50, y = 0.825, label = 'Income above = -0.04 + 0.01*Hours - 0.00008*Hours^2')
+
+
+
+#Fit is not great, try adding term
+
+hours_per_week_rates$hours_per_week3 = hours_per_week_rates$hours_per_week^3
+quadraticModel3 <- lm(income_above ~ hours_per_week + hours_per_week2 + hours_per_week3, data=hours_per_week_rates)
+summary(quadraticModel3)
+#Adj. R2 = 0.2889 but first order term is not significant
+#income = -0.08125 - 0.004452*hours_per_week + 0.0002951*hours_per_week^2 - 0.000002499*hours_per_week^3
+
+third_order<- data.frame(hours_per_week)
+third_order$income_above <- -0.08125 - 0.004452*third_order$hours_per_week + 0.0002951*third_order$hours_per_week^2 - 0.000002499*third_order$hours_per_week^3
+ggplot(hours_per_week_rates, aes(y=income_above, x=hours_per_week)) + geom_point() +geom_line(data = third_order) +  labs(title="%Income above 50K vs hours_per_week + hours_per_week^3")
+
+#Third order doesn't look like good fit. Try adding secod order into model, but non-parametric may be better with this variable
+```
+Re-run and compare new simplified model based on EDA above:
+
+replace workclass with work_sector
+replace marital_status with marriage_status
+replace occupation with collar
+drop native_country, native_born, birthplace, none show as significant
+drop education, keep education_num *quadratics will be added to more complex model not part 1
+
+```{r}
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-workclass,-marital_status,-occupation,-native_country,-native_born, -birthplace,-capital_gain_bin,-capital_loss_bin,-capital_gain_or_loss,-education)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$work_sector <- as.factor(logit.set$work_sector)
+logit.set$work_sector <- as.numeric(logit.set$work_sector)
+logit.set$marriage_status <- as.factor(logit.set$marriage_status)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$collar <- as.factor(logit.set$collar)
+logit.set$collar <- as.numeric(logit.set$collar)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+car::vif(model)
+#Race & sex show VIF > 2.5
+
+#Note work_sector shows as not significant now, re-run model without
+logit.set <- adult %>% select(-fnlwgt,-workclass,-marital_status,-occupation,-native_country,-native_born, -birthplace,-capital_gain_bin,-capital_loss_bin,-capital_gain_or_loss,-education,-work_sector)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+#logit.set$work_sector <- as.factor(logit.set$work_sector)
+#logit.set$work_sector <- as.numeric(logit.set$work_sector)
+logit.set$marriage_status <- as.factor(logit.set$marriage_status)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$collar <- as.factor(logit.set$collar)
+logit.set$collar <- as.numeric(logit.set$collar)
+logit.set$relationship <- as.numeric(logit.set$relationship)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+car::vif(model)
+#Relationship & sex show VIF > 2.5
+
+```
+
+Use LASSO for variable selection
+
+```{r}
+lasso.set <- adult %>% select(-fnlwgt,-workclass,-marital_status,-occupation,-native_country,-education)
+lasso.set <- na.omit(lasso.set)
+
+lasso.set$marriage_status <- as.factor(lasso.set$marriage_status)
+lasso.set$marriage_status <- as.numeric(lasso.set$marriage_status)
+lasso.set$collar <- as.factor(lasso.set$collar)
+lasso.set$collar <- as.numeric(lasso.set$collar)
+lasso.set$relationship <- as.numeric(lasso.set$relationship)
+lasso.set$race <- as.numeric(lasso.set$race)
+lasso.set$sex <- as.numeric(lasso.set$sex)
+
+trainIndices = sample(seq(1:length(lasso.set$income)),round(.7*length(lasso.set$income)))
+lasso.train = lasso.set[trainIndices,]
+lasso.test = lasso.set[-trainIndices,]
+
+train.x <- model.matrix(income~.,lasso.train)
+train.y<-lasso.train$income
+cvfit <- cv.glmnet(train.x, train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+#CV misclassification error rate is little below .1
+print("CV Error Rate:")
+cvfit$cvm[which(cvfit$lambda==cvfit$lambda.min)]
+
+#Optimal penalty
+print("Penalty Value:")
+cvfit$lambda.min
+
+#For final model predictions go ahead and refit lasso using entire
+#data set
+finalmodel<-glmnet(train.x, train.y, family = "binomial",lambda=cvfit$lambda.min)
+coef(finalmodel)
+
+#Lasso dropped relationship and work_sector, re-run regression and compare
+#Re-run regression with birthplace to compare to native_country
+logit.set <- adult %>% select(-fnlwgt,-workclass,-marital_status,-occupation,-native_country,-native_born, -birthplace,-capital_gain_bin,-capital_loss_bin,-capital_gain_or_loss,-education,-relationship,-work_sector)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+
+logit.set$marriage_status <- as.factor(logit.set$marriage_status)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$collar <- as.factor(logit.set$collar)
+logit.set$collar <- as.numeric(logit.set$collar)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+car::vif(model)
+#Race & sex show VIF > 2.5
+```
+Create ROC and AUC to compare original vs simplified model
+
+```{r}
+
+```
+
+More complex model:
+Use simple reduced model from LASSO as starting point then add:
+Age quadratic terms age^2 and age^3
+Education_num quadratic terms education_num^2
+hours_per_week quadratic terms hours_per_week^2
+
+```{r}
+
+logit.set <- adult %>% select(-fnlwgt,-workclass,-marital_status,-occupation,-native_country,-native_born, -birthplace,-capital_gain_bin,-capital_loss_bin,-capital_gain_or_loss,-education,-relationship,-work_sector)
+logit.set <- na.omit(logit.set)
+logit.set$income.binary<-0
+logit.set$income.binary[logit.set$income==" >50K"] <- 1
+logit.set$income.binary = as.factor(logit.set$income.binary)
+logit.set <- logit.set %>% select(-income)
+logit.set$age2 = logit.set$age^2
+logit.set$age3 = logit.set$age^3
+logit.set$education_num2 = logit.set$education_num^2
+logit.set$hours_per_week2 = logit.set$hours_per_week^2
+
+logit.set$marriage_status <- as.factor(logit.set$marriage_status)
+logit.set$marriage_status <- as.numeric(logit.set$marriage_status)
+logit.set$collar <- as.factor(logit.set$collar)
+logit.set$collar <- as.numeric(logit.set$collar)
+logit.set$race <- as.numeric(logit.set$race)
+logit.set$sex <- as.numeric(logit.set$sex)
+#logit.set$birthplace <- as.numeric(logit.set$birthplace)
+
+trainIndices = sample(seq(1:length(logit.set$income.binary)),round(.7*length(logit.set$income.binary)))
+logit.train = logit.set[trainIndices,]
+logit.test = logit.set[-trainIndices,]
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=logit.train)
+str(logit.train)
+summary(model)
+
+logit.test$IncomeProbability <- predict(model, newdata = logit.test, type = "response")
+
+logit.test["Prediction"] = 0
+logit.test$Prediction[logit.test$IncomeProbability>0.5] = 1
+logit.test$Prediction=as.factor(logit.test$Prediction)
+logit.test$income=as.factor(logit.test$income.binary)
+
+confusionMatrix(logit.test$Prediction, logit.test$income.binary)
+
+
+car::vif(model)
+```
+
+Import train/test splits created by Cameron
+
+```{r}
+train_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/train_na_rm.csv", header = TRUE)
+
+test_na_rm = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_Removed/test_na_rm.csv", header = TRUE)
+
+train_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/train_na_as_cat.csv", header = TRUE)
+
+test_na_as_cat = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/Test_Train_Set/NAs_as_a_category/test_na_as_cat.csv", header = TRUE)
+```
+
+Create Feature lists for models
+
+```{r}
+features.simple = c("age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar")
+
+features.complex = c("age","education_num","race","sex","capital_gain","capital_loss","hours_per_week","marriage_status","collar","age2","age3","education_num2","hours_per_week2")
+
+```
+
+Add features from EDA to the train/test sets
+
+```{r}
+#train_na_rm
+train_na_rm$income.binary<-0
+train_na_rm$income.binary[train_na_rm$income==" >50K"] <- 1
+train_na_rm$income.binary = as.factor(train_na_rm$income.binary)
+
+train_na_rm$marriage_status <- "Other"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+train_na_rm$marriage_status[train_na_rm$marital_status %in% c("Never-married")] <- "Single"
+
+train_na_rm$collar <- "Other"
+train_na_rm$collar[train_na_rm$occupation %in% c("Adm-clerical")] <- "White-support"
+train_na_rm$collar[train_na_rm$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+train_na_rm$collar[train_na_rm$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+train_na_rm$age2 = train_na_rm$age^2
+train_na_rm$age3 = train_na_rm$age^3
+train_na_rm$education_num2 = train_na_rm$education_num^2
+train_na_rm$hours_per_week2 = train_na_rm$hours_per_week^2
+
+train_na_rm$race <- as.factor(train_na_rm$race)
+train_na_rm$sex <- as.factor(train_na_rm$sex)
+train_na_rm$marriage_status <- as.factor(train_na_rm$marriage_status)
+train_na_rm$collar <- as.factor(train_na_rm$collar)
+
+#test_na_rm
+test_na_rm$income.binary<-0
+test_na_rm$income.binary[test_na_rm$income==" >50K"] <- 1
+test_na_rm$income.binary = as.factor(test_na_rm$income.binary)
+
+test_na_rm$marriage_status <- "Other"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+test_na_rm$marriage_status[test_na_rm$marital_status %in% c("Never-married")] <- "Single"
+
+test_na_rm$collar <- "Other"
+test_na_rm$collar[test_na_rm$occupation %in% c("Adm-clerical")] <- "White-support"
+test_na_rm$collar[test_na_rm$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+test_na_rm$collar[test_na_rm$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+test_na_rm$age2 = test_na_rm$age^2
+test_na_rm$age3 = test_na_rm$age^3
+test_na_rm$education_num2 = test_na_rm$education_num^2
+test_na_rm$hours_per_week2 = test_na_rm$hours_per_week^2
+
+test_na_rm$race <- as.factor(test_na_rm$race)
+test_na_rm$sex <- as.factor(test_na_rm$sex)
+test_na_rm$marriage_status <- as.factor(test_na_rm$marriage_status)
+test_na_rm$collar <- as.factor(test_na_rm$collar)
+
+#train_na_as_cat
+train_na_as_cat$income.binary<-0
+train_na_as_cat$income.binary[train_na_as_cat$income==" >50K"] <- 1
+train_na_as_cat$income.binary = as.factor(train_na_as_cat$income.binary)
+
+#Evaluate reducing levels to Government, Private, Self-Employed, Other
+train_na_as_cat$workclass <- trimws(train_na_as_cat$workclass)
+train_na_as_cat$work_sector <- "Other"
+train_na_as_cat$work_sector[train_na_as_cat$workclass %in% c("Federal-gov","Local-gov","State-gov")] <- "Government"
+train_na_as_cat$work_sector[train_na_as_cat$workclass %in% c("Private")] <- "Private"
+train_na_as_cat$work_sector[train_na_as_cat$workclass %in% c("Self-emp-inc","Self-emp-not-inc")] <- "Self_Employed"
+train_na_as_cat$work_sector[train_na_as_cat$workclass %in% c("Never-worked","Without-pay")] <- "Not_Working"
+train_na_as_cat$work_sector = as.factor(train_na_as_cat$work_sector)
+
+train_na_as_cat$marriage_status <- "Other"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+train_na_as_cat$marriage_status[train_na_as_cat$marital_status %in% c("Never-married")] <- "Single"
+
+train_na_as_cat$collar <- "Other"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Adm-clerical")] <- "White-support"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+train_na_as_cat$collar[train_na_as_cat$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+train_na_as_cat$age2 = train_na_as_cat$age^2
+train_na_as_cat$age3 = train_na_as_cat$age^3
+train_na_as_cat$education_num2 = train_na_as_cat$education_num^2
+train_na_as_cat$hours_per_week2 = train_na_as_cat$hours_per_week^2
+
+train_na_as_cat$race <- as.factor(train_na_as_cat$race)
+train_na_as_cat$sex <- as.factor(train_na_as_cat$sex)
+train_na_as_cat$marriage_status <- as.factor(train_na_as_cat$marriage_status)
+train_na_as_cat$collar <- as.factor(train_na_as_cat$collar)
+
+#test_na_as_cat
+test_na_as_cat$income.binary<-0
+test_na_as_cat$income.binary[test_na_as_cat$income==" >50K"] <- 1
+test_na_as_cat$income.binary = as.factor(test_na_as_cat$income.binary)
+
+#Evaluate reducing levels to Government, Private, Self-Employed, Other
+test_na_as_cat$workclass <- trimws(test_na_as_cat$workclass)
+test_na_as_cat$work_sector <- "Other"
+test_na_as_cat$work_sector[test_na_as_cat$workclass %in% c("Federal-gov","Local-gov","State-gov")] <- "Government"
+test_na_as_cat$work_sector[test_na_as_cat$workclass %in% c("Private")] <- "Private"
+test_na_as_cat$work_sector[test_na_as_cat$workclass %in% c("Self-emp-inc","Self-emp-not-inc")] <- "Self_Employed"
+test_na_as_cat$work_sector[test_na_as_cat$workclass %in% c("Never-worked","Without-pay")] <- "Not_Working"
+test_na_as_cat$work_sector = as.factor(test_na_as_cat$work_sector)
+
+test_na_as_cat$marriage_status <- "Other"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Married-AF-spouse","Married-civ-spouse")] <- "Married"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Divorced","Married-spouse-absent","Separated","Widowed")] <- "Previously-Married"
+test_na_as_cat$marriage_status[test_na_as_cat$marital_status %in% c("Never-married")] <- "Single"
+
+test_na_as_cat$collar <- "Other"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Adm-clerical")] <- "White-support"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Exec-managerial","Prof-specialty","Protective-serv","Sales","Tech-support
+")] <- "White"
+test_na_as_cat$collar[test_na_as_cat$occupation %in% c("Armed-Forces
+","Craft-repair","Farming-fishing","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-serv","Transport-moving")] <- "Blue"
+
+test_na_as_cat$age2 = test_na_as_cat$age^2
+test_na_as_cat$age3 = test_na_as_cat$age^3
+test_na_as_cat$education_num2 = test_na_as_cat$education_num^2
+test_na_as_cat$hours_per_week2 = test_na_as_cat$hours_per_week^2
+
+test_na_as_cat$race <- as.factor(test_na_as_cat$race)
+test_na_as_cat$sex <- as.factor(test_na_as_cat$sex)
+test_na_as_cat$marriage_status <- as.factor(test_na_as_cat$marriage_status)
+test_na_as_cat$collar <- as.factor(test_na_as_cat$collar)
+
+```
+
+Base Logistic regression model with all original variables for comparison
+
+```{r}
+original.variables <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country")
+
+dat.train.x <- train_na_as_cat %>% select(original.variables)
+
+dat.train.x %>% summarise_all(funs(sum(is.na(.))))
+
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+dat.train.x %>% summarise_all(funs(sum(is.na(.))))
+
+#glmnet requires a matrix 
+dat.train.x <- data.matrix(dat.train.x)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_as_cat %>% select(original.variables)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- data.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+significance_check <- train_na_as_cat %>% select(original.variables,"income")
+significance_check$income.binary<-0
+significance_check$income.binary[significance_check$income==">50K"] <- 1
+significance_check <- significance_check %>% select(-income)
+
+significance_check <- mutate_if(significance_check, is.factor, ~ as.numeric(as.factor(.x)))
+significance_check <- mutate_if(significance_check, is.character, ~ as.numeric(as.factor(.x)))
+
+model <- glm(income.binary ~.,family=binomial(link='logit'),data=significance_check)
+summary(model)
+
+#occupation and native_country are not significant
+
+significance_check2 <- significance_check %>% select(-fnlwgt)
+model2 <- glm(income.binary ~.,family=binomial(link='logit'),data=significance_check2)
+summary(model2)
+
+```
+
+Re-run Base model without CV
+
+```{r}
+#Setup Training set
+base.train <- train_na_as_cat %>% select(original.variables,"income")
+base.train <- mutate_if(base.train, is.character, ~ (as.factor(.x)))
+base.train <- mutate_if(base.train, is.factor, ~ as.numeric(as.factor(.x)))
+base.train$income <- base.train$income-1
+
+
+#Run Model
+base.model1 <- glm(income ~ .,family="binomial",data=base.train)
+
+#Setup Test set
+base.test <- test_na_as_cat %>% select(original.variables,"income")
+base.test <- mutate_if(base.test, is.character, ~ (as.factor(.x)))
+base.test <- mutate_if(base.test, is.factor, ~ as.numeric(as.factor(.x)))
+base.test$income <- base.test$income-1
+
+#Make Predictions and check performance
+predprobs<-predict(base.model1,base.test,type="response")
+base.roc<-roc(response=base.test$income,predictor=predprobs,levels=c(0,1))
+plot(base.roc,print.thres="best", main="Base Logistic Regression") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+text(x = .40, y = .6,paste("AUC-test = ", round(auc(base.roc),3), sep = ""))
+
+auc(base.roc)
+#AUC=0.905
+
+threshold=0.214
+log.predclass<-ifelse(predprobs>threshold,1,0)
+log.predclass<-factor(log.predclass)
+confusionMatrix(as.factor(log.predclass),as.factor(base.test$income))
+```
+
+From above:
+Drop fnlwgt not a relevant predictor of income
+Drop native_country (not significant)
+
+From EDA 
+replace workclass with work_sector
+replace marital_status with marriage_status
+replace occupation with collar
+Drop Education, redundant with education_num
+
+
+```{r}
+dat.train.x <- train_na_as_cat %>% select(original.variables,"work_sector","marriage_status","collar")
+dat.train.x = dat.train.x %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country")
+
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+dat.train.x %>% summarise_all(funs(sum(is.na(.))))
+
+#glmnet requires a matrix 
+dat.train.x <- data.matrix(dat.train.x)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_as_cat %>% select(original.variables,"work_sector","marriage_status","collar")
+dat.val1.x = dat.val1.x %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country")
+
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- data.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+
+dat.train.x <- train_na_as_cat %>% select(original.variables,"work_sector","marriage_status","collar")
+dat.train.x = dat.train.x %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country")
+
+significance_check3 <- train_na_as_cat %>% select(original.variables,"work_sector","marriage_status","collar","income")
+significance_check3 = significance_check3 %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country")
+
+significance_check3$income.binary<-0
+significance_check3$income.binary[significance_check3$income==">50K"] <- 1
+significance_check3 <- significance_check3 %>% select(-income)
+
+significance_check3 <- mutate_if(significance_check3, is.factor, ~ as.numeric(as.factor(.x)))
+significance_check3 <- mutate_if(significance_check3, is.character, ~ as.numeric(as.factor(.x)))
+
+model3 <- glm(income.binary ~.,family=binomial(link='logit'),data=significance_check3)
+summary(model3)
+
+#Work_sector is not significant
+```
+
+From above:
+Drop work_sector
+
+```{r}
+dat.train.x <- train_na_as_cat %>% select(original.variables,"marriage_status","collar")
+dat.train.x = dat.train.x %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country",-"relationship")
+
+#dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.x <- mutate_if(dat.train.x, is.character, ~ as.factor(.x))
+dat.train.y <- train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+dat.train.x %>% summarise_all(funs(sum(is.na(.))))
+
+#glmnet requires a matrix 
+dat.train.x <- data.matrix(dat.train.x)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_as_cat %>% select(original.variables,"marriage_status","collar")
+dat.val1.x = dat.val1.x %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country",-"relationship")
+
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- data.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+
+dat.train.x <- train_na_as_cat %>% select(original.variables,"marriage_status","collar")
+dat.train.x = dat.train.x %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country")
+
+significance_check4 <- train_na_as_cat %>% select(original.variables,"marriage_status","collar","income")
+significance_check4 = significance_check4 %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country",-"relationship")
+
+significance_check4$income.binary<-0
+significance_check4$income.binary[significance_check4$income==">50K"] <- 1
+significance_check4 <- significance_check4 %>% select(-income)
+
+#significance_check4 <- mutate_if(significance_check4, is.factor, ~ as.numeric(as.factor(.x)))
+significance_check4 <- mutate_if(significance_check4, is.character, ~ as.factor(.x))
+
+model3 <- glm(income.binary ~.,family=binomial(link='logit'),data=significance_check4)
+summary(model3)
+
+```
+
+
+
+Re-Run Simple Logistic regression on full train set instead of using CV
+
+```{r}
+#Setup Training set
+simple1.train <- train_na_as_cat %>% select(original.variables,"marriage_status","collar","income")
+simple1.train = simple1.train %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country",-"relationship")
+simple1.train$income <- as.factor(simple1.train$income)
+
+#Run Model
+simple.model1 <- glm(income ~ .,family="binomial",data=simple1.train)
+
+#Setup Test set
+simple1.test <- test_na_as_cat %>% select(original.variables,"marriage_status","collar","income")
+simple1.test = simple1.test %>% select(-"workclass",-"marital_status",-"occupation",-"education",-"fnlwgt",-"native_country",-"relationship")
+simple1.test$income <- as.factor(simple1.test$income)
+
+#Make Predictions and check performance
+predprobs<-predict(simple.model1,simple1.test,type="response")
+simple.roc<-roc(response=simple1.test$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(simple.roc,print.thres="best", main="Simple Logistic Regression") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+text(x = .40, y = .6,paste("AUC-test = ", round(auc(simple.roc),3), sep = ""))
+auc(simple.roc)
+#AUC=0.896
+
+
+threshold=0.218
+log.predclass<-ifelse(predprobs>threshold,">50K","<=50K")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,complex.test$income)
+```
+
+Run Complex Logistic regression with NA removed, add AUC metric
+
+```{r}
+dat.train.x <- train_na_rm %>% select(features.complex)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_rm$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_rm %>% select(features.complex)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_rm$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+```
+
+Run Simple Logistic regression with NA as category, add AUC metric
+
+```{r}
+dat.train.x <- train_na_as_cat %>% select(features.simple)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.train.y <- train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf)
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_as_cat %>% select(features.simple)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+
+```
+
+Run Complex Logistic regression with NA as category, add AUC metric
+
+```{r}
+dat.train.x <- train_na_rm %>% select(features.complex)
+dat.train.x <- dat.train.x %>% select(-age2)
+
+#dat.train.x$sex_marriage <- paste(dat.train.x$sex, "_", dat.train.x$marriage_status)
+#dat.train.x$sex_marriage <- as.factor(dat.train.x$sex_marriage)
+#dat.train.x$relationship <- as.factor(dat.train.x$relationship)
+dat.train.x <- mutate_if(dat.train.x, is.factor, ~ as.numeric(as.factor(.x)))
+
+dat.train.y <- train_na_rm$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#glmnet requires a matrix 
+dat.train.x <- as.matrix(dat.train.x)
+
+set.seed(284)
+flds <- createFolds(dat.train.y, k = 5, list = TRUE, returnTrain = FALSE)
+foldids = rep(1,length(dat.train.y))
+foldids[flds$Fold2] = 2
+foldids[flds$Fold3] = 3
+foldids[flds$Fold4] = 4
+foldids[flds$Fold5] = 5
+
+cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000)
+#cvfit <- cv.glmnet(dat.train.x, dat.train.y, family = "binomial", type.measure = "class", nlambda = 1000,foldid = foldids)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+
+#Get training set predictions...We know they are biased but lets create ROC's.
+#These are predicted probabilities from logistic model  exp(b)/(1+exp(b))
+fit.pred <- predict(cvfit, newx = dat.train.x, type = "response")
+
+#Compare the prediction to the real outcome
+head(fit.pred)
+head(dat.train.y)
+
+#Create ROC curves
+pred <- prediction(fit.pred[,1], dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+
+#Plot ROC
+plot(roc.perf,print.thres="best")
+abline(a=0, b= 1) #Ref line indicating poor performance
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Get Test Set
+dat.val1.x <- test_na_rm %>% select(features.complex)
+dat.val1.x <- dat.val1.x %>% select(-age2)
+
+#dat.val1.x$sex_marriage <- paste(dat.val1.x$sex, "_", dat.val1.x$marriage_status)
+#dat.val1.x$sex_marriage <- as.factor(dat.val1.x$sex_marriage)
+#dat.val1.x$relationship <- as.factor(dat.val1.x$relationship)
+dat.val1.x <- mutate_if(dat.val1.x, is.factor, ~ as.numeric(as.factor(.x)))
+
+dat.val1.x <- as.matrix(dat.val1.x)
+
+dat.val1.y <- test_na_rm$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+#Run model from training set on valid set I
+fit.pred1 <- predict(cvfit, newx = dat.val1.x, type = "response")
+
+#ROC curves
+pred1 <- prediction(fit.pred1[,1], dat.val1.y)
+roc.perf1 = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.val1 <- performance(pred1, measure = "auc")
+auc.val1 <- auc.val1@y.values
+plot(roc.perf1,print.thres="best")
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.val1[[1]],3), sep = ""))
+
+test.roc <- roc(predictor = fit.pred1, response = dat.val1.y, levels = (levels(dat.val1.y)))
+
+plot(test.roc,print.thres="best",ylim=c(0,1))
+text(x = .40, y = .6,paste("AUC-test = ", round(auc.val1[[1]],3), sep = ""))
+
+threshold=0.5
+log.predclass<-ifelse(fit.pred1>threshold,">50K","<=50K")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,dat.val1.y)
+
+```
+
+Re-run Complex model without CV
+
+```{r}
+#Setup Training set
+complex.train <- train_na_as_cat %>% select(features.complex,"income")
+complex.train$income <- as.factor(complex.train$income)
+
+#Run Model
+complex.model1 <- glm(income ~ .,family="binomial",data=complex.train)
+
+#Setup Test set
+complex.test <- test_na_as_cat %>% select(features.complex,"income")
+complex.test$income <- as.factor(complex.test$income)
+
+#Make Predictions and check performance
+predprobs<-predict(complex.model1,complex.test,type="response")
+complex.roc<-roc(response=complex.test$income,predictor=predprobs,levels=c("<=50K",">50K"))
+plot(complex.roc,print.thres="best", main="Complex Logistic Regression") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR
+text(x = .40, y = .6,paste("AUC-test = ", round(auc(complex.roc),3), sep = ""))
+
+auc(complex.roc)
+#AUC=0.9016
+
+threshold=0.211
+log.predclass<-ifelse(predprobs>threshold,">50K","<=50K")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,complex.test$income)
+```
+
+Re-run Complex feature logistic regression including all possible interaction terms to look for significant ones
+
+```{r}
+interaction_check_set <- train_na_rm %>% select(income,features.complex)
+interaction_check_set$income.binary<-0
+interaction_check_set$income.binary[interaction_check_set$income==">50K"] <- 1
+interaction_check_set$income <- interaction_check_set$income.binary
+interaction_check_set <- interaction_check_set %>% select(-income.binary)
+
+model <- glm(income ~.*.,family=binomial(link='logit'),data=interaction_check_set)
+summary(model)
+
+test_na_rm$IncomeProbability <- predict(model, newdata = test_na_rm, type = "response")
+
+test_na_rm["Prediction"] = 0
+test_na_rm$Prediction[test_na_rm$IncomeProbability>0.5] = 1
+test_na_rm$Prediction=as.factor(test_na_rm$Prediction)
+test_na_rm$income=as.factor(test_na_rm$income)
+
+confusionMatrix(test_na_rm$Prediction, test_na_rm$income)
+
+```
+
+Plot potentially significant Interactions for futher EDA, candidates are:
+age x collar
+education_num x marriage_status
+sex x marriage_status (Should relationship be added back to model since this is similar?)
+capital_gain x marriage_status
+hours_per_week x marriage_status
+
+```{r}
+train_na_rm %>% ggplot(aes(x=collar,y=age,color=income)) + 
+  geom_boxplot()+ labs(title= "Age x Collar Interaction" , x = "Collar Group", y= "Age") +
+  theme(axis.text.x=element_text(angle=45,hjust=1))
+#Note Age is higher for >50K at all levels, may not be true interaction
+
+train_na_rm %>% ggplot(aes(x=marriage_status,y=education_num,color=income)) + 
+  geom_boxplot()+ labs(title= "Education x Marriage Interaction" , x = "Marriage Group", y= "Education") +
+  theme(axis.text.x=element_text(angle=0,hjust=1))
+#Note Education is higher for >50K at all levels, may not be true interaction
+
+train_na_rm %>% ggplot(aes(x=marriage_status,y=hours_per_week,color=income)) + 
+  geom_boxplot()+ labs(title= "Hours/Week x Marriage Interaction" , x = "Marriage Group", y= "Hours per Week") +
+  theme(axis.text.x=element_text(angle=0,hjust=1))
+
+train_na_rm %>% ggplot(aes(x=marriage_status,y=capital_gain,color=income)) + 
+  geom_boxplot()+ labs(title= "Capital Gain x Marriage Interaction" , x = "Marriage Group", y= "Capital Gain") +
+  theme(axis.text.x=element_text(angle=0,hjust=1))
+
+sex_v_marriage <- interaction_check_set %>% group_by(sex,marriage_status) %>% summarise(n=n(),income_above = mean(income))
+sex_v_marriage.table = table(sex_v_marriage$sex, sex_v_marriage$marriage_status)
+
+```
+
+Run knn with NA as categoty, optimial k to maximize AUC
+
+```{r}
+train_na_rm <- mutate_if(train_na_rm, is.character, ~ as.factor(as.factor(.x)))
+train_na_rm <- mutate_if(train_na_rm, is.factor, ~ as.numeric(as.factor(.x)))
+test_na_rm <- mutate_if(test_na_rm, is.character, ~ as.factor(as.factor(.x)))
+test_na_rm <- mutate_if(test_na_rm, is.factor, ~ as.numeric(as.factor(.x)))
+
+scale = preProcess(train_na_rm, method = "range")
+scaled.train_na_rm = predict(scale, train_na_rm)
+scaled.test_na_rm = predict(scale, test_na_rm)
+
+
+knn.predictors = c("age","workclass","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country")
+
+optimal_k = data.frame(AUC = numeric(100), k = numeric(100))
+
+for(i in seq(1, 100, by=1))
+{
+  fit <- class::knn(cl = scaled.train_na_rm$income, test = scaled.test_na_rm %>% select(knn.predictors), train = scaled.train_na_rm %>% select(knn.predictors), k=i, prob = TRUE)
+  roc.perf <- roc(scaled.test_na_rm$income, attributes(fit)$prob)
+  optimal_k$AUC[i] = roc.perf$auc*1
+  optimal_k$k[i] = i
+}
+
+optimal_k %>% filter(k>1) %>% ggplot(aes(x = k, y = AUC)) + geom_line()
+
+optimalknn <- class::knn(cl = scaled.train_na_rm$income, test = scaled.test_na_rm %>% select(knn.predictors), train = scaled.train_na_rm %>% select(knn.predictors), k = 30, prob = TRUE)
+
+plot(roc(scaled.test_na_rm$income, attributes(optimalknn)$prob), print.thres = T, print.auc=T, asp=1)
+
+confusionMatrix(as.factor(optimalknn), as.factor(scaled.test_na_rm$income))
+
+```
+
+LDA/QDA
+
+Need to check for multivariate normality for assumptions
+Need to check covariance matrix for assumptions
+
+Since response is imbalanced, re-run with priors to see if improvements
+
+```{r}
+continuous.predictors = c("age","education_num","capital_gain","capital_loss","hours_per_week")
+quadratic.predictors = c("age2","age3","education_num2","hours_per_week2")
+
+#Test for multivariate normality
+multivariate_sample <- train_na_as_cat %>% select(continuous.predictors)
+multivariate_sample <- multivariate_sample[sample(1:nrow(multivariate_sample), 1000), ]
+
+#install.packages("mvShapiroTest")
+library(mvShapiroTest)
+mvShapiro.Test(as.matrix(multivariate_sample))
+
+#Test for homogeneity of covariance matrices
+#install.packages("heplots")
+library(heplots)
+boxm_test <- train_na_as_cat %>% select(continuous.predictors,income)
+#boxm_test$income <- as.numeric(as.factor(boxm_test$income))
+boxM <- boxM(boxm_test[, c(1:5)], boxm_test$income)
+boxM
+plot(boxM)
+#BoxM null rejected, covariance not same across each level, use QDA instead of LDA
+
+standardize = preProcess(train_na_as_cat, method = c("center", "scale"))
+standardized.train_na_as_cat = predict(standardize, train_na_as_cat)
+standardized.test_na_as_cat = predict(standardize, test_na_as_cat)
+
+#Training Set
+dat.train.x <- standardized.train_na_as_cat %>% select(continuous.predictors,"income")
+dat.train.x$income <- as.factor(dat.train.x$income)
+dat.train.y <- standardized.train_na_as_cat$income
+dat.train.y <- as.factor(as.character(dat.train.y))
+
+#Check distributions after standardizing
+hist.data.frame(dat.train.x, nclass=20)
+
+#Boxplot capital gain/loss to check for outliers
+boxplot(dat.train.x$capital_gain)
+boxplot(dat.train.x$capital_loss)
+
+
+fit.lda <- qda(income ~ ., data = dat.train.x, prior = c(0.76,0.24))
+pred.lda <- predict(fit.lda, newdata = dat.train.x)
+
+preds <- pred.lda$posterior
+preds <- as.data.frame(preds)
+
+pred <- prediction(preds[,2],dat.train.y)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+
+#Valid set I
+dat.val1.x <- standardized.test_na_as_cat %>% select(continuous.predictors)
+
+dat.val1.y <- standardized.test_na_as_cat$income
+dat.val1.y <- as.factor(as.character(dat.val1.y))
+
+
+pred.lda1 <- predict(fit.lda, newdata = dat.val1.x)
+
+preds1 <- pred.lda1$posterior
+preds1 <- as.data.frame(preds1)
+
+pred1 <- prediction(preds1[,2],dat.val1.y)
+roc.perf = performance(pred1, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred1, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Re-run with priors info
+summary(dat.train.y)
+# <=50K = 19799 / 26049 = 0.76
+# >50K = 6250 / 26049 = 0.24
+
+#Start here to do LDA ROC plot with best
+qda.roc <- roc(predictor = preds1[,1], response = dat.val1.y, levels = (levels(dat.val1.y)))
+
+plot(qda.roc,print.thres="best",ylim=c(0,1),main="QDA")
+text(x = .40, y = .6,paste("AUC-test = ", round(auc.train[[1]],3), sep = ""))
+
+threshold=0.988
+log.predclass<-ifelse(preds1[,1]>threshold,"<=50K",">50K")
+log.predclass<-factor(log.predclass)
+confusionMatrix(log.predclass,dat.val1.y)
+
+
+
+```
+
+Overlay ROC plots
+
+```{r}
+#without color for cutoff; but adding colors to allow for comarisons of the curves
+plot(base.roc,main="ROC Comparison by Model")
+plot(simple.roc,col="orange", add = TRUE)
+plot(complex.roc,col="blue", add = TRUE)
+plot(qda.roc,col="red", add = TRUE)
+legend("bottomright",legend=c("Base","Simple","Complex","QDA"),col=c("black","orange","blue","red"),lty=1,lwd=1)
+
+ggroc(base.roc)
+
+roclist <- list("Base" = base.roc,"Simple" = simple.roc,"Complex" = complex.roc, "QDA" = qda.roc)
+
+ggroc(roclist, legacy.axes = TRUE) + scale_colour_manual(values = c("black","green", "blue", "red")) + geom_abline() + ggtitle("ROC Comparison by Model") + labs(x = "Specificity", y = "Sensitivity") + theme(legend.title=element_blank())+ coord_fixed() + theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+Random Forest
+
+```{r}
+
+rf.predictors = c("age","workclass","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country")
+
+#One more time with a Random Forest
+#I'm removing the fluff variables just to make coding easier.
+dat.train.rf <- train_na_as_cat %>% select(income, rf.predictors, native_country)
+dat.train.rf <- mutate_if(dat.train.rf, is.character, ~ as.factor(as.factor(.x)))
+str(dat.train.rf)
+
+train.rf<-randomForest(income~.,data=dat.train.rf,mtry=4,ntree=500,importance=T)
+fit.pred<-predict(train.rf,newdata=dat.train.rf,type="prob")
+
+pred <- prediction(fit.pred[,2], dat.train.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Tune the mtry parameter, mtry=2 has lowest OOB
+mtry <- tuneRF(dat.train.rf %>% select(-income),dat.train.rf$income, ntreeTry=500,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+
+train.rf<-randomForest(income~.,data=dat.train.rf,mtry=2,ntree=500,importance=T)
+fit.pred<-predict(train.rf,newdata=dat.train.rf,type="prob")
+
+pred <- prediction(fit.pred[,2], dat.train.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+
+#Predict Validation Set I
+dat.val1.rf <- test_na_as_cat %>% select(income, rf.predictors, native_country)
+dat.val1.rf <- mutate_if(dat.val1.rf, is.character, ~ as.factor(as.factor(.x)))
+
+#Make test set factor levels match training used in model so predictions work
+levels(dat.val1.rf$native_country) <- levels(dat.train.rf$native_country)
+
+str(dat.train.rf)
+str(dat.val1.rf)
+
+pred.val1<-predict(train.rf,newdata=dat.val1.rf,type="prob")
+
+
+
+pred <- prediction(pred.val1[,2], dat.val1.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+
+Random Forest w just simple features to compare to logistic regression
+
+```{r}
+
+#One more time with a Random Forest
+#I'm removing the fluff variables just to make coding easier.
+dat.train.rf <- train_na_as_cat %>% select(income, features.simple)
+dat.train.rf <- mutate_if(dat.train.rf, is.character, ~ as.factor(as.factor(.x)))
+str(dat.train.rf)
+
+train.rf<-randomForest(income~.,data=dat.train.rf,mtry=4,ntree=500,importance=T)
+fit.pred<-predict(train.rf,newdata=dat.train.rf,type="prob")
+
+pred <- prediction(fit.pred[,2], dat.train.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Tune the mtry parameter, mtry=2 has lowest OOB
+mtry <- tuneRF(dat.train.rf %>% select(-income),dat.train.rf$income, ntreeTry=500,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+
+train.rf<-randomForest(income~.,data=dat.train.rf,mtry=2,ntree=500,importance=T)
+fit.pred<-predict(train.rf,newdata=dat.train.rf,type="prob")
+
+pred <- prediction(fit.pred[,2], dat.train.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+
+#Predict Validation Set I
+dat.val1.rf <- test_na_as_cat %>% select(income, features.simple)
+dat.val1.rf <- mutate_if(dat.val1.rf, is.character, ~ as.factor(as.factor(.x)))
+
+#Make test set factor levels match training used in model so predictions work
+levels(dat.val1.rf$native_country) <- levels(dat.train.rf$native_country)
+
+str(dat.train.rf)
+str(dat.val1.rf)
+
+pred.val1<-predict(train.rf,newdata=dat.val1.rf,type="prob")
+
+
+
+pred <- prediction(pred.val1[,2], dat.val1.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+
+Random Forest w just complex features to compare to logistic regression
+
+```{r}
+
+#One more time with a Random Forest
+#I'm removing the fluff variables just to make coding easier.
+dat.train.rf <- train_na_as_cat %>% select(income, features.simple, features.complex)
+dat.train.rf <- mutate_if(dat.train.rf, is.character, ~ as.factor(as.factor(.x)))
+str(dat.train.rf)
+
+train.rf<-randomForest(income~.,data=dat.train.rf,mtry=4,ntree=500,importance=T)
+fit.pred<-predict(train.rf,newdata=dat.train.rf,type="prob")
+
+pred <- prediction(fit.pred[,2], dat.train.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+#Tune the mtry parameter, mtry=2 has lowest OOB
+mtry <- tuneRF(dat.train.rf %>% select(-income),dat.train.rf$income, ntreeTry=500,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+
+train.rf<-randomForest(income~.,data=dat.train.rf,mtry=2,ntree=500,importance=T)
+fit.pred<-predict(train.rf,newdata=dat.train.rf,type="prob")
+
+pred <- prediction(fit.pred[,2], dat.train.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+
+
+#Predict Validation Set I
+dat.val1.rf <- test_na_as_cat %>% select(income, features.simple, features.complex)
+dat.val1.rf <- mutate_if(dat.val1.rf, is.character, ~ as.factor(as.factor(.x)))
+
+#Make test set factor levels match training used in model so predictions work
+levels(dat.val1.rf$native_country) <- levels(dat.train.rf$native_country)
+
+str(dat.train.rf)
+str(dat.val1.rf)
+
+pred.val1<-predict(train.rf,newdata=dat.val1.rf,type="prob")
+
+
+
+pred <- prediction(pred.val1[,2], dat.val1.rf$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```

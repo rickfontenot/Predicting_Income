@@ -1,0 +1,557 @@
+---
+title: "predicting_income"
+output: html_document
+---
+
+```{r}
+pacman::p_load(
+  VIM,
+  tidyverse,
+  janitor,
+  ggplot2,
+  GGally,
+  caret,
+  smotefamily,
+  ROSE,
+  h2o,
+  pROC,
+  tree,
+  ROCR
+)
+```
+
+```{r load data}
+adult = read.csv("https://raw.githubusercontent.com/rickfontenot/Predicting_Income/main/adult.data", header = FALSE, stringsAsFactors = T, col.names = c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week","native_country","income"))
+```
+
+_______________________________________________________________________________
+# EDA
+_______________________________________________________________________________
+
+Description of variables from UCI:
+
+Response: >50K, <=50K.
+
+age: continuous.
+workclass: Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked.
+fnlwgt: continuous.
+education: Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool.
+education-num: continuous.
+marital-status: Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse.
+occupation: Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handlers-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces.
+relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried.
+race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black.
+sex: Female, Male.
+capital-gain: continuous.
+capital-loss: continuous.
+hours-per-week: continuous.
+native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands.
+
+```{r}
+summary(adult)
+```
+
+Investigate NA values to determine what needs resolution
+
+```{r}
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
+#Note there are not missing values showing up initially but that's because the missing values are represented by "?" instead of NA
+#Replace "?" with NA and re-do missing value analysis
+adult[, 1:14][adult[, 1:14] == " ?"] <- NA
+summary(adult)
+aggr_plot <- aggr(adult, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(adult), cex.axis=.7, gap=3, ylab=c("Percent data missing","Combinations Missing"))
+marginplot(adult[c(2,7)])
+marginplot(adult[c(2,14)])
+marginplot(adult[c(7,14)])
+#occupation missing 5.66% of values
+#workclass missing 5.64% of values
+#native-country missing 1.79& of values
+#Note that half of the missing workclass values occur on observations that are also missing occupation
+```
+
+Examine formats of data available
+
+```{r}
+categorical.explanatory = c("workclass","education","marital_status","occupation","relationship","race","sex","native_country")
+str(adult)
+```
+
+
+
+```{r}
+summary(adult)
+```
+
+
+```{r}
+ggpairs(adult,columns=c(1,3,5,11,12,13),aes(colour=income))
+```
+
+```{r}
+ggplot(data = adult, aes(x=workclass, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+ggplot(data = adult, aes(x=education, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+ggplot(data = adult, aes(x=marital_status, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+ggplot(data = adult, aes(x=occupation, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=4))
+
+ggplot(data = adult, aes(x=relationship, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+ggplot(data = adult, aes(x=race, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+ggplot(data = adult, aes(x=sex, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=2))
+
+ggplot(data = adult, aes(x=native_country, fill = income)) + geom_bar() + scale_x_discrete(guide = guide_axis(n.dodge=8))
+```
+
+```{r}
+adult %>% tabyl(workclass, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(education, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(marital_status, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(occupation, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(relationship, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(race, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(sex, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+
+adult %>% tabyl(native_country, income) %>% adorn_percentages("row") %>% adorn_pct_formatting(digits = 1) %>% adorn_ns("front")
+```
+
+```{r}
+summary(adult$capital_gain)
+summary(adult$capital_loss)
+```
+
+```{r}
+ggplot(data = adult, aes(x = capital_gain, y = income)) + geom_boxplot()
+ggplot(data = adult, aes(x = log(capital_gain + .001), y = income)) + geom_boxplot()
+
+ggplot(data = adult, aes(x = capital_loss, y = income)) + geom_boxplot()
+ggplot(data = adult, aes(x = log(capital_loss + .001), y = income)) + geom_boxplot()
+
+
+ggplot(data = adult, aes(x = age, y = income)) + geom_boxplot()
+ggplot(data = adult, aes(x = log(age), y = income)) + geom_boxplot()
+
+ggplot(data = adult, aes(x = fnlwgt, y = income)) + geom_boxplot()
+ggplot(data = adult, aes(x = log(fnlwgt), y = income)) + geom_boxplot()
+```
+
+```{r}
+ggplot(data = adult, aes(x = education_num, y = education)) + geom_boxplot()
+```
+
+```{r}
+pc.result <- prcomp(adult[,c(1,3,5,11,12,13)], scale.=T)
+par(mfrow=c(1,2))
+eigenvals<-(pc.result$sdev)^2
+plot(1:6,eigenvals/sum(eigenvals),type="l",main="Scree Plot",ylab="Prop. Var. Explained")
+cumulative.prop<-cumsum(eigenvals/sum(eigenvals))
+plot(1:6,cumulative.prop,type="l",main="Cumulative proportion",ylim=c(0,1))
+par(mfrow=c(1,1))
+```
+
+```{r}
+pc.result$rotation
+```
+
+
+
+_______________________________________________________________________________
+# Modeling for Random Forest
+_______________________________________________________________________________
+Prep the data
+```{r}
+adult$income <- ifelse(adult$income == " <=50K", "below_fifty", "above_fifty")
+adult <- droplevels(adult)
+
+adult$sex <- as.numeric(ifelse(adult$sex == " Male", 1, 0))
+
+factors_list <- sapply(adult, is.factor)
+adult[,factors_list] <- lapply(adult[,factors_list], as.character)
+
+adult[is.na(adult)] = "null"
+
+adult[,factors_list] <- lapply(adult[,factors_list], as.factor)
+adult$income <- as.factor(adult$income)
+
+adult <- adult[,!(names(adult) %in% c('education', 'fnlwgt'))]
+```
+
+First, look at only quantitative variables
+```{r}
+set.seed(1234)
+train_ind = sample(dim(adult)[1],round(dim(adult)[1]*.8))
+train <- adult[train_ind, c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
+test <- adult[-train_ind, c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
+```
+
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 3,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+```
+
+Normal RF with ROC metric
+```{r}
+rf_1 <- train(income~., 
+                      data=train, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_1, newdata = test, type = "prob")
+
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc
+```
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test$income))
+```
+
+```{r}
+#SMOTE only takes quantitative variables
+train$income <- as.factor(train$income)
+table(train$income)
+new_train <- SMOTE(X = train[,c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week")], target = train[,"income"], K = 5, dup_size = 6)$data
+colnames(new_train)[colnames(new_train) == 'class'] <- 'income'
+table(new_train$income)
+```
+
+SMOTE RF with default split at .5
+```{r}
+rf_3 <- train(income~., 
+                      data=new_train, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_3, test, type="prob")
+roc(predictor=probability$above_fifty,
+               response=test$income,
+               levels=rev(levels(test$income)))$auc
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test$income))
+```
+
+SMOTE RF with optimized split
+```{r}
+rf_4 <- train(income~., 
+                      data=new_train, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_4, newdata = test, type = "prob")
+
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc
+```
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test$income))
+```
+
+ROSE RF
+```{r}
+#ROSE only takes quantitative variables
+table(train$income)
+rose_train <- train[,c("age", "education_num", "sex", "capital_gain", "capital_loss", "hours_per_week", "income")]
+rose_train <- ROSE(income ~ ., data = rose_train, N = 25000)$data
+table(rose_train$income)
+```
+
+```{r}
+rf_5 <- train(income~., 
+                      data=rose_train, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_5, newdata = test, type = "prob")
+
+roc(predictor = probability$above_fifty, response = test$income, levels = rev(levels(test$income)))$auc
+```
+
+```{r}
+head(rose_train)
+```
+
+
+Target Encoding for Categorical Variables
+```{r}
+train_h20 <- adult[train_ind,]
+test_h2o <- adult[-train_ind,]
+```
+
+```{r}
+h2o.init(nthreads = -1)
+
+train_h20 <- as.h2o(train_h20)
+test_h2o <- as.h2o(test_h2o)
+
+seed = 1234
+
+train_h20$fold <- h2o.kfold_column(train_h20, nfolds = 5, seed = seed)
+
+encoded_columns <- c("workclass", "marital_status", "occupation", "relationship", "race", "native_country")
+
+target_encoder <- h2o.targetencoder(training_frame = train_h20,
+                                    x = encoded_columns,
+                                    y = "income",
+                                    fold_column = "fold",
+                                    data_leakage_handling = "Kfold",
+                                    blending = TRUE,
+                                    inflection_point = 10,
+                                    smoothing = 20,
+                                    noise = 0.0,  
+                                    seed = seed)
+```
+
+```{r}
+transformed_train <- h2o.transform(target_encoder, train_h20, as_training=TRUE)
+transformed_test <- h2o.transform(target_encoder, test_h2o, noise=0)
+
+transformed_train <- as.data.frame(transformed_train)
+transformed_test <- as.data.frame(transformed_test)
+
+transformed_train = transformed_train[,!(names(transformed_train) %in% c(encoded_columns, "fold"))]
+
+transformed_test = transformed_test[,!(names(transformed_test) %in% c(encoded_columns, "fold"))]
+```
+
+Target Encoding RF
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+rf_6 <- train(income~., 
+                      data=transformed_train, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_6, newdata = transformed_test, type = "prob")
+
+roc(predictor=probability$above_fifty,
+    response=transformed_test$income,
+    levels=rev(levels(transformed_test$income)))$auc
+```
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, transformed_test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, transformed_test$income))
+```
+
+```{r}
+print(rf_6)
+varImp(rf_6)
+```
+
+```{r}
+pred <- prediction(probability[,2], transformed_test$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+
+Target Encoding Ranger
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     repeats = 3,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+ctrl <- trainControl(method = "cv",
+                     repeats = 3,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+rf_7 <- train(income~., 
+                      data=transformed_train, 
+                      method='ranger', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_7, newdata = transformed_test, type = "prob")
+
+roc(predictor=probability$above_fifty,
+    response=transformed_test$income,
+    levels=rev(levels(transformed_test$income)))$auc
+```
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 100000) > 0, ceiling(min(probability$above_fifty) * 100000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 100000) == 100000, 99999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 100000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, transformed_test$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, transformed_test$income))
+```
+This returned the best AUC
+
+```{r}
+print(rf_7)
+```
+
+```{r}
+pred <- prediction(probability[,2], test$income)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+```{r}
+h2o.shutdown(prompt = F)
+```
+
+```{r}
+train_full <- adult[train_ind,]
+test_full <- adult[-train_ind,]
+```
+
+One Hot Encoded RF
+```{r}
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     classProbs = T,
+                     summaryFunction = twoClassSummary)
+
+rf_8 <- train(income~., 
+                      data=train_full, 
+                      method='rf', 
+                      metric='ROC',
+                      trControl = ctrl)
+
+probability <- predict(rf_8, newdata = test_full, type = "prob")
+
+roc(predictor=probability$above_fifty,
+    response=test_full$income,
+    levels=rev(levels(test_full$income)))$auc
+```
+
+
+```{r}
+split_holder <- data.frame(decimal = NA, accuracy = NA, sens = NA, spec = NA, difference = NA)
+counter = 0
+min_prob <- ifelse(ceiling(min(probability$above_fifty) * 1000) > 0, ceiling(min(probability$above_fifty) * 1000), 1)
+max_prob <- ifelse(floor(max(probability$above_fifty) * 1000) == 1000, 999, floor(max(probability$above_fifty)))
+
+for (i in seq(min_prob, max_prob)) {
+  decimal <- i / 1000
+  counter = counter + 1
+  
+  prediction <- if_else(probability$above_fifty > decimal, "above_fifty", "below_fifty")
+  x <- confusionMatrix(table(prediction, test_full$income))
+
+  split_holder[counter,1] <- decimal
+  split_holder[counter,2] <- x$overall[1]
+  split_holder[counter,3] <- x$byClass[1]
+  split_holder[counter,4] <- x$byClass[2]
+  split_holder[counter,5] <- abs(x$byClass[1] - x$byClass[2])
+} 
+best_split <-(split_holder %>% filter(difference == min(difference)))$decimal
+
+prediction <- if_else(probability$above_fifty > best_split, "above_fifty", "below_fifty")
+confusionMatrix(table(prediction, test_full$income))
+```
+
+```{r}
+print(rf_8)
+varImp(rf_8)
+```

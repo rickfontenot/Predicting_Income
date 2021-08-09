@@ -1,0 +1,7 @@
+"0","#Make Predictions and check performance
+predprobs<-predict(complex.model1,complex.test,type=""response"")
+complex.roc<-roc(response=complex.test$income,predictor=predprobs,levels=c(""<=50K"","">50K""))
+"
+"2","Setting direction: controls < cases
+"
+"0","plot(complex.roc,print.thres=""best"", main=""Complex Logistic Regression"") #This graph is nice because the x axis is plotted in terms of specificity rather than FPR"

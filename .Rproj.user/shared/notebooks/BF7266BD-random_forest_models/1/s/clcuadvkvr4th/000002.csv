@@ -1,0 +1,4 @@
+"0","set.seed(1234)"
+"0","train_ind = sample(dim(adult)[1],round(dim(adult)[1]*.8))"
+"0","train <- adult[train_ind, c(""age"", ""education_num"", ""sex"", ""capital_gain"", ""capital_loss"", ""hours_per_week"", ""income"")]"
+"0","test <- adult[-train_ind, c(""age"", ""education_num"", ""sex"", ""capital_gain"", ""capital_loss"", ""hours_per_week"", ""income"")]"

@@ -1,0 +1,1 @@
+"0","ggplot(data = adult, aes(x = capital_gain, y = income)) + geom_boxplot()"

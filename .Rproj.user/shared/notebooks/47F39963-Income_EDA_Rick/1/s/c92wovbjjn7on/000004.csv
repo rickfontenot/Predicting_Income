@@ -1,0 +1,6 @@
+"0","adult$income.binary<-0"
+"0","adult$income.binary[adult$income=="" >50K""] <- 1"
+"0",""
+"0","education_num_rates <- adult %>% group_by(education_num) %>% summarise(income_above = mean(income.binary))"
+"0",""
+"0","education_num_rates %>% ggplot(mapping=aes(y=income_above, x=education_num)) + geom_point(size=1.5)+  labs(title=""%Income above 50K vs education_num"")"

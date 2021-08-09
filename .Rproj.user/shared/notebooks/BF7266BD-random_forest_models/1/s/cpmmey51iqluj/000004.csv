@@ -1,0 +1,2 @@
+"0","cumulative.prop<-cumsum(eigenvals/sum(eigenvals))"
+"0","plot(1:6,cumulative.prop,type=""l"",main=""Cumulative proportion"",ylim=c(0,1))"

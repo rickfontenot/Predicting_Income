@@ -1,0 +1,1 @@
+"0","text(x = .40, y = .6,paste(""AUC-test = "", round(auc.train[[1]],3), sep = """"))"

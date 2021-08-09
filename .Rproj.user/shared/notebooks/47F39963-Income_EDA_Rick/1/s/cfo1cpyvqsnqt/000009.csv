@@ -1,0 +1,8 @@
+"0",""
+"0",""
+"0","#How can we transform this for regression? or should we add Age^2 and Age^3 to model?"
+"0",""
+"0","age_rates$income_above_odds = age_rates$income_above / (1 - age_rates$income_above)"
+"0","age_rates$log_income_above_odds = log(age_rates$income_above_odds)"
+"0","age_rates %>% ggplot(mapping=aes(y=log_income_above_odds, x=age)) + geom_point(size=1.5)+  labs(title=""%Income above 50K vs Age"")"
+"0",""
