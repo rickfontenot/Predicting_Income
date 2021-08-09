@@ -1639,7 +1639,7 @@ auc(simple.roc)
 threshold=0.218
 log.predclass<-ifelse(predprobs>threshold,">50K","<=50K")
 log.predclass<-factor(log.predclass)
-confusionMatrix(log.predclass,complex.test$income)
+confusionMatrix(log.predclass,simple1.test$income)
 ```
 
 Run Complex Logistic regression with NA removed, add AUC metric
@@ -1876,22 +1876,31 @@ Re-run Complex feature logistic regression including all possible interaction te
 ```{r}
 interaction_check_set <- train_na_rm %>% select(income,features.complex)
 interaction_check_set$income.binary<-0
+#interaction_check_set$income.binary[interaction_check_set$income==" >50K"] <- 1
 interaction_check_set$income.binary[interaction_check_set$income==">50K"] <- 1
-interaction_check_set$income <- interaction_check_set$income.binary
-interaction_check_set <- interaction_check_set %>% select(-income.binary)
+interaction_check_set$income.binary <- as.factor(interaction_check_set$income.binary)
+interaction_check_set <- interaction_check_set %>% select(-income)
 
-model <- glm(income ~.*.,family=binomial(link='logit'),data=interaction_check_set)
+model <- glm(income.binary ~.*.,family=binomial(link='logit'),data=interaction_check_set)
 summary(model)
 
-test_na_rm$IncomeProbability <- predict(model, newdata = test_na_rm, type = "response")
+interaction_test_set <- test_na_rm %>% select(income,features.complex)
+interaction_test_set$income.binary<-0
+#interaction_test_set$income.binary[interaction_test_set$income==" >50K"] <- 1
+interaction_test_set$income.binary[interaction_test_set$income==">50K"] <- 1
+interaction_test_set$income.binary <- as.factor(interaction_test_set$income.binary)
+interaction_test_set <- interaction_test_set %>% select(-income)
 
-test_na_rm["Prediction"] = 0
-test_na_rm$Prediction[test_na_rm$IncomeProbability>0.5] = 1
-test_na_rm$Prediction=as.factor(test_na_rm$Prediction)
-test_na_rm$income=as.factor(test_na_rm$income)
+interaction_test_set$IncomeProbability <- predict(model, newdata = interaction_test_set, type = "response")
 
-confusionMatrix(test_na_rm$Prediction, test_na_rm$income)
+interaction_test_set["Prediction"] = 0
+interaction_test_set$Prediction[interaction_test_set$IncomeProbability>0.5] = 1
+interaction_test_set$Prediction=as.factor(interaction_test_set$Prediction)
+interaction_test_set$income=as.factor(interaction_test_set$income)
 
+confusionMatrix(interaction_test_set$Prediction, as.factor(interaction_test_set$income.binary))
+
+#There are multiple interaction terms that show significance but the model dropped original variables in lieu of interactions, need to explore these interactions individually to see what relationship is
 ```
 
 Plot potentially significant Interactions for futher EDA, candidates are:
