@@ -1,5 +1,5 @@
 # Preciting Income 
-MSDS6372 Project 1 Summer 2021 
+MSDS6372 Project 2 Summer 2021 
 Team: Tricia Herrera, Michael Mazel, Cameron Stewart, Rick Fontenot
 
 # Purpose 
