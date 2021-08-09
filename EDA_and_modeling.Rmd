@@ -610,7 +610,6 @@ capital_gain
 ```{r capital_gain}
 adult$income.binary<-0
 adult$income.binary[adult$income==" >50K"] <- 1
-adult$income.binary = as.factor(adult$income.binary)
 
 capital_gain <- adult %>% group_by(capital_gain) %>% summarise(income_above = mean(income.binary))
 
@@ -1069,7 +1068,7 @@ trainIndices = sample(seq(1:length(lasso.set$income)),round(.7*length(lasso.set$
 lasso.train = lasso.set[trainIndices,]
 lasso.test = lasso.set[-trainIndices,]
 
-train.x <- model.matrix(income~.,lasso.train)
+train.x <- model.matrix(income~.,lasso.train %>% select(-income.binary))
 train.y<-lasso.train$income
 cvfit <- cv.glmnet(train.x, train.y, family = "binomial", type.measure = "class", nlambda = 1000)
 plot(cvfit)
@@ -1124,11 +1123,7 @@ confusionMatrix(logit.test$Prediction, logit.test$income.binary)
 car::vif(model)
 #Race & sex show VIF > 2.5
 ```
-Create ROC and AUC to compare original vs simplified model
 
-```{r}
-
-```
 
 More complex model:
 Use simple reduced model from LASSO as starting point then add:
